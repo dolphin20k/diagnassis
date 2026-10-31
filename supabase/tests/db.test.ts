@@ -189,7 +189,6 @@ describe("profiles and role escalation", () => {
       await expectFail("delete from public.profiles where id = $1", [u], /permission denied/);
       await expectFail("insert into public.attempts (user_id, role_name, requirements) values ($1, 'x', '[]')", [u], /permission denied/);
       await expectFail("insert into public.policies (type, version, body) values ('terms', '9.9', repeat('x', 30))", [], /permission denied/);
-      await expectFail("update public.app_settings set value = '99'::jsonb where key = 'attempt_limit'", [], /./).catch(() => {});
     });
   });
   it("students cannot change app settings (RLS filters the row)", async () => {
@@ -507,6 +506,20 @@ describe("account deletion", () => {
 });
 
 describe("feedback and notifications", () => {
+  it("lets admins switch off individual admin notification types", async () => {
+    await tx(async () => {
+      const admin = await createUser("adminp@test.dev", "AdminP");
+      const stu = await createUser("stup@test.dev", "StuP");
+      await makeAdmin(admin);
+      await asUser(admin);
+      await c.query(`update public.profiles set notification_prefs = notification_prefs || '{"deletion":false}'::jsonb where id = $1`, [admin]);
+      await asUser(stu);
+      await c.query("select public.request_account_deletion('x')");
+      await asUser(admin);
+      expect((await c.query("select count(*) from public.notifications where user_id = $1 and type = 'deletion'", [admin])).rows[0].count).toBe("0");
+    });
+  });
+
   it("validates feedback and alerts admins on low ratings", async () => {
     await tx(async () => {
       const admin = await createUser("admin7@test.dev", "Admin7");

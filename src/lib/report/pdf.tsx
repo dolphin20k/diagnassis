@@ -91,6 +91,8 @@ function ReportDocument({ d }: { d: ReportData }) {
     <Document title={`DIAGNASSIS readiness report - ${d.role}`} author="DIAGNASSIS" creator="DIAGNASSIS">
       <Page size="A4" style={s.page}>
         <View style={s.header}>
+          {/* react-pdf Image is a PDF primitive, not an <img>; the logo is decorative next to the title text. */}
+          {/* eslint-disable-next-line jsx-a11y/alt-text */}
           <Image src={logo} style={{ height: 34 }} />
           <View style={{ alignItems: "flex-end" }}>
             <Text style={{ fontFamily: "Manrope", fontWeight: 700 }}>Readiness Report</Text>

@@ -20,6 +20,11 @@ export interface NotificationPrefs {
   report: boolean;
   platform: boolean;
   policy: boolean;
+  /** Admin-only types; a missing key means "on". */
+  deletion?: boolean;
+  roles?: boolean;
+  trends?: boolean;
+  rating?: boolean;
 }
 
 type Table<Row, Insert = Partial<Row>> = { Row: Row; Insert: Insert; Update: Partial<Row>; Relationships: [] };

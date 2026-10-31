@@ -81,3 +81,8 @@ export const roleItemsSchema = z
   )
   .min(1)
   .max(20);
+
+export const forgotSchema = z.object({ email: emailSchema });
+export const resetSchema = z
+  .object({ password: passwordSchema, confirm: z.string().min(1, "Confirm your new password.") })
+  .refine((v) => v.password === v.confirm, { path: ["confirm"], message: "Passwords do not match." });

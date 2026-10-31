@@ -19,8 +19,8 @@ declare prefs jsonb;
 begin
   select notification_prefs into prefs from public.profiles where id = p_user;
   if not found then return; end if;
-  if p_type::text in ('results', 'report', 'platform', 'policy')
-     and coalesce((prefs ->> p_type::text)::boolean, true) = false then
+  -- Every notification type can be switched off per user; a missing key means "on".
+  if coalesce((prefs ->> p_type::text)::boolean, true) = false then
     return;
   end if;
   insert into public.notifications (user_id, type, title, body, attempt_id, link)
@@ -32,7 +32,8 @@ create or replace function public.notify_admins(
 returns void language sql security definer set search_path = '' as $$
   insert into public.notifications (user_id, type, title, body, link)
   select id, p_type, left(p_title, 160), left(coalesce(p_body, ''), 500), p_link
-  from public.profiles where role = 'admin';
+  from public.profiles
+  where role = 'admin' and coalesce((notification_prefs ->> p_type::text)::boolean, true);
 $$;
 
 create or replace function public.clean_skill_list(p_skills text[])
