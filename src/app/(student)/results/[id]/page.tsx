@@ -12,8 +12,10 @@ import { LinkButton } from "@/components/ui/Button";
 import { ScoreRing } from "@/components/ui/ScoreRing";
 import { SkillBar } from "@/components/ui/SkillBar";
 import { InsightsLoader, RateResult } from "@/components/student/ResultWidgets";
-import { BAND_COPY, deltaLabel, fallbackAction, rankGaps, searchUrl, trendLabel } from "@/lib/scoring";
+import { BAND_COPY, deltaLabel, fallbackAction, rankGaps, trendLabel } from "@/lib/scoring";
 import { fmtDate } from "@/lib/format";
+import { attachVideos } from "@/lib/server/youtube";
+import { VideoCard } from "@/components/student/VideoCard";
 import type { ActionItem } from "@/lib/types/database";
 
 export const metadata: Metadata = { title: "Result" };
@@ -39,8 +41,10 @@ export default async function ResultPage({ params }: { params: Promise<{ id: str
   const matched = rows.filter((x) => x.status === "matched");
   const weak = rows.filter((x) => x.status === "weak");
   const missing = rows.filter((x) => x.status === "missing");
-  const gaps = rankGaps(r.rows, 3);
-  const actions: ActionItem[] = a.insights?.actions ?? gaps.map((g) => fallbackAction(a.role_name, g));
+  const beginner = r.tested_count === 0; // "I don't know any of these skills": a roadmap instead of a tested score
+  const gaps = rankGaps(r.rows, beginner ? 5 : 3);
+  // Older results were saved with search links only; resolve their videos now (cached) so every card opens a real video.
+  const actions: ActionItem[] = await attachVideos(a.insights?.actions ?? gaps.map((g) => fallbackAction(a.role_name, g, beginner)));
   const delta = deltaLabel(r.delta, r.previous_date);
   const rising = rows.filter((x) => x.trend === "rising");
   const declining = rows.filter((x) => x.trend === "declining").map((x) => x.skill).concat(a.declining_skills);
@@ -54,13 +58,14 @@ export default async function ResultPage({ params }: { params: Promise<{ id: str
         <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-[clamp(26px,3vw,34px)] tracking-tight">{a.role_name} result</h1>
-            <p className="mt-1 text-sm text-ink-2">Taken {fmtDate(a.submitted_at)} · {r.tested_count} skills tested · {r.question_count} questions</p>
+            <p className="mt-1 text-sm text-ink-2">Taken {fmtDate(a.submitted_at)} · {beginner ? "Beginner roadmap, no skills claimed" : `${r.tested_count} skills tested · ${r.question_count} questions`}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {canRetake ? <LinkButton href="/diagnostic" variant="secondary">Retake</LinkButton> : null}
             <a href={`/api/reports/${id}`} className="inline-flex items-center justify-center gap-2 rounded-md border border-primary bg-primary px-[18px] py-2.5 font-display text-sm font-semibold text-white hover:bg-primary-dark hover:text-white"><Icon name="download" size={16} /> Download PDF report</a>
           </div>
         </div>
+        {beginner ? <p className="mt-3 flex items-center gap-2 rounded-md bg-indigo-50 px-3 py-2 text-sm text-primary-dark"><Icon name="lightbulb" size={16} /> You told us you are starting from scratch, so there was nothing to test. Below is a beginner-friendly roadmap of the skills {a.role_name} needs. Learn them in order, then take the diagnostic again to see your progress.</p> : null}
         {a.is_custom_role ? <p className="mt-3 flex items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900"><Icon name="sparkles" size={16} /> Requirements for this role were AI-estimated, so this result may be less precise than for curated roles.</p> : null}
       </div>
 
@@ -78,8 +83,8 @@ export default async function ResultPage({ params }: { params: Promise<{ id: str
       {!a.insights ? <InsightsLoader attemptId={id} /> : null}
 
       <section aria-labelledby="actions">
-        <h2 id="actions" className="text-2xl">Your top {Math.max(actions.length, 1)} things to work on</h2>
-        <p className="mt-1 text-ink-2">Chosen by how much each gap affects your score for this role.{a.insights && !a.insights.ai_generated ? " Standard guidance is shown because AI-written advice was unavailable." : ""}</p>
+        <h2 id="actions" className="text-2xl">{beginner ? `Your beginner roadmap for ${a.role_name}` : `Your top ${Math.max(actions.length, 1)} things to work on`}</h2>
+        <p className="mt-1 text-ink-2">{beginner ? "Start at step 1 and work down: these skills carry the most weight for this role." : "Chosen by how much each gap affects your score for this role."}{a.insights && !a.insights.ai_generated ? " Standard guidance is shown because AI-written advice was unavailable." : ""}</p>
         {actions.length === 0 ? <div className="mt-4"><Card><p>You matched every skill we tested. Keep your skills current, and try adding stretch skills to your profile for a tougher diagnostic.</p></Card></div> : null}
         <ol className="mt-4 flex flex-col gap-4">
           {actions.map((x, i) => (
@@ -96,18 +101,13 @@ export default async function ResultPage({ params }: { params: Promise<{ id: str
               <p className="mt-2 rounded-md bg-indigo-50 px-3 py-2 text-[15px]"><strong className="text-primary-dark">Next step:</strong> {x.next_step}</p>
               <ul className="mt-4 grid gap-3 sm:grid-cols-2" aria-label={`Learning resources for ${x.skill}`}>
                 {x.resources.map((rs) => (
-                  <li key={rs.title}>
-                    <a href={searchUrl(rs.search_query, rs.kind)} target="_blank" rel="noopener noreferrer" className="group flex h-full items-start gap-3 rounded-lg border border-border p-4 text-ink hover:border-primary hover:bg-indigo-50/40">
-                      <span className="grid size-10 shrink-0 place-items-center rounded-md bg-sidebar text-white"><Icon name={rs.kind === "video" ? "play" : rs.kind === "docs" ? "file-text" : "layers"} size={18} /></span>
-                      <span className="min-w-0"><span className="block font-display text-[15px] font-semibold group-hover:text-primary">{rs.title}</span><span className="block text-xs text-ink-2">{rs.kind === "video" ? "YouTube search" : "Web search"} · {rs.level ?? cap(rs.kind)}<Icon name="external-link" size={11} className="ml-1 inline" /></span></span>
-                    </a>
-                  </li>
+                  <li key={rs.title}><VideoCard resource={rs} /></li>
                 ))}
               </ul>
             </li>
           ))}
         </ol>
-        <p className="mt-3 text-xs text-ink-2">Resource links open a search for the suggested topic. We do not control third-party content.</p>
+        <p className="mt-3 text-xs text-ink-2">Video cards open the recommended YouTube video; other links open a web search for the topic. We do not control third-party content.</p>
       </section>
 
       <section aria-labelledby="gaps" className="grid gap-6 lg:grid-cols-2">

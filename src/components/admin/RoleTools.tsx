@@ -65,7 +65,7 @@ export function PromoteButton({ id, name }: { id: string; name: string }) {
 type Step = { name: string; state: "waiting" | "running" | "done" | "failed"; note?: string };
 
 /** Drives the same per-role pipeline the scheduled job uses, one request per role, with live progress. */
-export function RunResearch({ last }: { last: { status: string; startedAt: string; created: number; applied: number } | null }) {
+export function RunResearch({ last }: { last: { status: string; startedAt: string; created: number; applied: number; error?: string | null } | null }) {
   const router = useRouter();
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState<Step[]>([]);
@@ -86,13 +86,13 @@ export function RunResearch({ last }: { last: { status: string; startedAt: strin
         setSteps((s) => s.map((x, k) => (k === i ? { ...x, state: "running" } : x)));
         try {
           const r = await post({ phase: "role", runId: start.runId, roleId: role.id });
-          setSteps((s) => s.map((x, k) => (k === i ? { ...x, state: r.result.error ? "failed" : "done", note: r.result.error ? "Partly failed" : `${r.result.created} suggested, ${r.result.approved} applied` } : x)));
+          setSteps((s) => s.map((x, k) => (k === i ? { ...x, state: r.result.error ? "failed" : "done", note: r.result.error ? `Partly failed: ${String(r.result.error).slice(0, 140)}` : `${r.result.created} suggested, ${r.result.approved} applied` } : x)));
         } catch {
           setSteps((s) => s.map((x, k) => (k === i ? { ...x, state: "failed", note: "Failed" } : x)));
         }
       }
       const fin = await post({ phase: "finish", runId: start.runId });
-      setMsg(`Research finished: ${fin.status}.`);
+      setMsg(fin.status === "failed" ? "Research finished: failed. See the reason next to each role above and check the NVIDIA model in Settings." : `Research finished: ${fin.status}.`);
       router.refresh();
     } catch {
       setMsg("We could not start market research. Check the NVIDIA and Supabase service configuration in Settings.");
@@ -102,7 +102,7 @@ export function RunResearch({ last }: { last: { status: string; startedAt: strin
   }
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-3"><Button onClick={run} loading={running}><Icon name="refresh-cw" size={16} /> Run market research now</Button><span className="text-sm text-ink-2">{last ? `Last run ${fmtDateTime(last.startedAt)}: ${last.status}, ${last.created} suggested, ${last.applied} applied` : "No runs yet"}</span></div>
+      <div className="flex flex-wrap items-center gap-3"><Button onClick={run} loading={running}><Icon name="refresh-cw" size={16} /> Run market research now</Button><span className="text-sm text-ink-2">{running ? "Run in progress…" : last ? `Last run ${fmtDateTime(last.startedAt)}: ${last.status}, ${last.created} suggested, ${last.applied} applied${last.status === "failed" && last.error ? ` (${last.error.slice(0, 120)})` : ""}` : "No runs yet"}</span></div>
       {steps.length ? (
         <ul className="grid gap-1.5 text-sm" aria-live="polite">
           {steps.map((s) => <li key={s.name} className="flex items-center gap-2">{s.state === "running" ? <span className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden /> : <Icon name={s.state === "done" ? "circle-check" : s.state === "failed" ? "circle-alert" : "circle"} size={16} className={s.state === "done" ? "text-emerald-600" : s.state === "failed" ? "text-rose-600" : "text-slate-300"} />}<span>{s.name}</span><span className="text-ink-2">{s.note}</span></li>)}

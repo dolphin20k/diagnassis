@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getCronSecret } from "@/lib/env";
+import { DEFAULT_AI_MODELS, getCronSecret } from "@/lib/env";
 import { runRoleResearch } from "@/lib/server/research";
 import { getApiAdmin, json, UUID } from "@/lib/server/api";
 
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
     const { data: roles } = await admin.from("roles").select("id,name").eq("is_active", true).order("name");
     const { data: run, error } = await admin
       .from("market_research_runs")
-      .insert({ trigger_source: viaCron ? "cron" : "manual", roles_total: roles?.length ?? 0, model: process.env.NVIDIA_MODEL || "meta/llama-3.3-70b-instruct" })
+      .insert({ trigger_source: viaCron ? "cron" : "manual", roles_total: roles?.length ?? 0, model: process.env.NVIDIA_MODEL || DEFAULT_AI_MODELS[0] })
       .select("id,started_at")
       .single();
     if (error || !run) return json({ error: "run_failed" }, 500);

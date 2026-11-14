@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { isValidReportKey, reportKey, signedReportUrl, SIGNED_URL_TTL_SECONDS, putReport } from "@/lib/r2";
+import { isValidReportKey, REPORT_LAYOUT_VERSION, reportKey, signedReportUrl, SIGNED_URL_TTL_SECONDS, putReport } from "@/lib/r2";
 import { getR2Env } from "@/lib/env";
 
 const U = "0b6f5d3e-1c2a-4f10-9a77-3d9b2c1a8e55";
@@ -7,12 +7,13 @@ const A = "7a1d9c20-55aa-4b0e-8d61-12c3f4e5a6b7";
 
 describe("R2 object keys", () => {
   it("are built only from UUIDs", () => {
-    expect(reportKey(U, A)).toBe(`reports/${U}/${A}.pdf`);
+    expect(reportKey(U, A)).toBe(`reports/${U}/${A}.v${REPORT_LAYOUT_VERSION}.pdf`);
     expect(() => reportKey("../../etc", A)).toThrow();
     expect(() => reportKey(U, "x/../y")).toThrow();
   });
   it("validate strictly", () => {
     expect(isValidReportKey(`reports/${U}/${A}.pdf`)).toBe(true);
+    expect(isValidReportKey(`reports/${U}/${A}.v2.pdf`)).toBe(true);
     for (const bad of ["reports/a/b.pdf", `reports/${U}/${A}.exe`, `../reports/${U}/${A}.pdf`, `reports/${U}/${A}.pdf/../x`, ""]) expect(isValidReportKey(bad)).toBe(false);
   });
 });

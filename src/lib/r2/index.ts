@@ -8,13 +8,15 @@ import { getR2Env } from "@/lib/env";
  * objects are only ever reachable through short-lived presigned URLs that the server issues
  * after verifying the requester owns the report. Credentials never reach the browser.
  */
-const KEY_RE = /^reports\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.pdf$/;
+const KEY_RE = /^reports\/[0-9a-f-]{36}\/[0-9a-f-]{36}(\.v\d+)?\.pdf$/;
+/** Bump when the PDF layout changes: stored reports with an older version are ignored and regenerated on next download. */
+export const REPORT_LAYOUT_VERSION = 2;
 export const SIGNED_URL_TTL_SECONDS = 300;
 export const MAX_REPORT_BYTES = 10 * 1024 * 1024;
 
 /** Keys are built only from server-verified UUIDs, never from user-supplied names. */
 export function reportKey(userId: string, attemptId: string): string {
-  const key = `reports/${userId}/${attemptId}.pdf`;
+  const key = `reports/${userId}/${attemptId}.v${REPORT_LAYOUT_VERSION}.pdf`;
   if (!KEY_RE.test(key)) throw new Error("invalid_report_key");
   return key;
 }

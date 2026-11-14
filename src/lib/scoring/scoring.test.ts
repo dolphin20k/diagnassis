@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BAND_COPY, bandFor, deltaLabel, fallbackAction, rankGaps, searchUrl } from "@/lib/scoring";
+import { BAND_COPY, bandFor, deltaLabel, fallbackAction, fallbackBeginnerSummary, rankGaps, searchUrl } from "@/lib/scoring";
 import { normalizeWeights, priorityForWeight, weightsTotal } from "@/lib/scoring/weights";
 import type { ResultRow } from "@/lib/types/database";
 
@@ -76,5 +76,15 @@ describe("normalizeWeights", () => {
   });
   it("derives priority labels from weight bands", () => {
     expect([priorityForWeight(18), priorityForWeight(8), priorityForWeight(3)]).toEqual(["high", "medium", "low"]);
+  });
+});
+
+describe("beginner guidance", () => {
+  const row = { skill: "Node.js", weight: 14, priority: "high", trend: "stable", trend_change: null, why: null, tested: false, proficiency: 0, status: "missing", points: 0 } as const;
+  it("writes first-steps copy for students starting from scratch", () => {
+    const a = fallbackAction("Full Stack Developer", row, true);
+    expect(a.next_step).toMatch(/first 1-2 weeks/);
+    expect(a.why).toMatch(/foundation/);
+    expect(fallbackBeginnerSummary("Full Stack Developer", ["JavaScript", "React"])).toMatch(/starting from scratch/);
   });
 });

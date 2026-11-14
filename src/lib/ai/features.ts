@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { callJson, type CallLogger } from "@/lib/ai/nvidia";
 import { sanitizeLabel } from "@/lib/sanitize";
-import { fallbackAction, fallbackSummary, fallbackTrendSummary, rankGaps } from "@/lib/scoring";
+import { fallbackAction, fallbackBeginnerSummary, fallbackSummary, fallbackTrendSummary, rankGaps } from "@/lib/scoring";
 import { normalizeWeights, priorityForWeight } from "@/lib/scoring/weights";
 import type { ActionItem, AttemptInsights, AttemptResult, RequirementSnapshot, SkillPriority } from "@/lib/types/database";
 import type { ProposedSkill, Suggestion } from "@/lib/ai/research-rules";
@@ -145,7 +145,7 @@ const insightsSchema = z.object({
       }),
     )
     .min(1)
-    .max(3),
+    .max(5),
 });
 
 export async function buildInsights(
@@ -155,11 +155,13 @@ export async function buildInsights(
   opts: { log?: CallLogger; useAi?: boolean } = {},
 ): Promise<AttemptInsights> {
   const { log, useAi = true } = opts;
-  const gaps = rankGaps(result.rows, 3);
+  // A student who claimed no skills ("I don't know any of these skills") gets a 5-step beginner roadmap instead of 3 gap fixes.
+  const beginner = result.tested_count === 0;
+  const gaps = rankGaps(result.rows, beginner ? 5 : 3);
   const now = new Date().toISOString();
   const fallback = (): AttemptInsights => ({
-    actions: gaps.map((g) => fallbackAction(role, g)),
-    summary: fallbackSummary(role, result),
+    actions: gaps.map((g) => fallbackAction(role, g, beginner)),
+    summary: beginner ? fallbackBeginnerSummary(role, gaps.map((g) => g.skill)) : fallbackSummary(role, result),
     trend_summary: fallbackTrendSummary(role, result, declining),
     ai_generated: false,
     model: null,
@@ -181,11 +183,16 @@ export async function buildInsights(
         "For each gap, explain why it matters for the target role, give ONE concrete next step sized for 1-2 weeks, and suggest 2 learning resources as search queries " +
         "(a YouTube video, course, docs page or practice site that a student could find — describe it by search query, never invent URLs or channel names). " +
         "Use only the skills provided in 'gaps' and the numbers provided; do not invent statistics. " +
+        (beginner
+          ? "This student is a complete beginner who has none of these skills yet: treat 'gaps' as an ordered beginner learning roadmap (foundations first), " +
+            "make each next_step a gentle first step for week 1-2 that needs no prior experience, and recommend beginner-level resources only. Be encouraging. "
+          : "") +
         DATA_RULE,
       user: JSON.stringify({
         output_format: { summary: "2 sentences on the overall result", trend_summary: "2 sentences connecting market trends to this student's path", actions: [{ skill: "string from gaps", why: "string", next_step: "string", resources: [{ title: "string", kind: "video|course|docs|practice", search_query: "string", level: "Beginner|Intermediate|null" }] }] },
         input: {
           target_role: sanitizeLabel(role, 80),
+          student_level: beginner ? "complete beginner, starting from scratch" : "has some of the required skills",
           score: result.score,
           band: result.band,
           gaps: gaps.map((g) => ({ skill: g.skill, status: g.status, proficiency_percent: g.proficiency, weight_percent: g.weight, priority: g.priority, market_trend: g.trend ?? "stable" })),
@@ -197,7 +204,7 @@ export async function buildInsights(
     const bySkill = new Map(data.actions.map((a) => [a.skill.toLowerCase(), a]));
     const actions: ActionItem[] = gaps.map((g) => {
       const a = bySkill.get(g.skill.toLowerCase());
-      if (!a) return fallbackAction(role, g);
+      if (!a) return fallbackAction(role, g, beginner);
       return {
         skill: g.skill,
         status: g.status === "missing" ? "missing" : "weak",

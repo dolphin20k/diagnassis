@@ -11,6 +11,7 @@ import type { ProfileRow } from "@/lib/types/database";
 
 export interface RoleOption { id: string; name: string }
 const OTHERS = "others";
+const BRANCH_OTHER = "__other__";
 
 export function ProfileForm({ profile, roles, skills, mode, onDone, onSkip }: { profile: ProfileRow; roles: RoleOption[]; skills: string[]; mode: "onboard" | "edit"; onDone?: () => void; onSkip?: () => void }) {
   const router = useRouter();
@@ -24,6 +25,8 @@ export function ProfileForm({ profile, roles, skills, mode, onDone, onSkip }: { 
     role: profile.target_role_id ?? (profile.target_role_other ? OTHERS : ""),
     other: profile.target_role_other ?? "",
   });
+  // A saved branch that is not in the list is shown as "Other / Enter your branch" with its text filled in.
+  const [branchOther, setBranchOther] = useState(() => !!profile.branch && !(BRANCHES as readonly string[]).includes(profile.branch));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((s) => ({ ...s, [k]: v }));
@@ -35,6 +38,7 @@ export function ProfileForm({ profile, roles, skills, mode, onDone, onSkip }: { 
     if (!parsed.success) {
       const m: Record<string, string> = {};
       for (const i of parsed.error.issues) if (!m[String(i.path[0])]) m[String(i.path[0])] = i.message;
+      if (branchOther && !f.branch.trim()) m.branch = "Type your branch or specialization.";
       if (!f.role) m.role = "Choose a target role.";
       else if (f.role === OTHERS && !f.other.trim()) m.role = "Type the role you are aiming for.";
       return setErrors(m);
@@ -56,11 +60,12 @@ export function ProfileForm({ profile, roles, skills, mode, onDone, onSkip }: { 
       <Field label="College / institution" value={f.college} onChange={(e) => set("college", e.target.value)} error={errors.college} placeholder="e.g. PSG College of Technology, Coimbatore" />
       <div className="flex flex-col gap-1.5">
         <label htmlFor="branch" className="font-display text-[13px] font-semibold">Branch / specialization</label>
-        <select id="branch" value={f.branch} onChange={(e) => set("branch", e.target.value)} aria-invalid={errors.branch ? true : undefined} className={`rounded-md border bg-surface px-3 py-2.5 text-[15px] outline-none focus:border-primary focus:shadow-[0_0_0_3px_var(--focus-ring)] ${errors.branch ? "border-gap-critical" : "border-border"}`}>
+        <select id="branch" value={branchOther ? BRANCH_OTHER : f.branch} onChange={(e) => { if (e.target.value === BRANCH_OTHER) { setBranchOther(true); set("branch", (BRANCHES as readonly string[]).includes(f.branch) ? "" : f.branch); } else { setBranchOther(false); set("branch", e.target.value); } }} aria-invalid={errors.branch ? true : undefined} className={`rounded-md border bg-surface px-3 py-2.5 text-[15px] outline-none focus:border-primary focus:shadow-[0_0_0_3px_var(--focus-ring)] ${errors.branch ? "border-gap-critical" : "border-border"}`}>
           <option value="">Choose your branch</option>
           {BRANCHES.map((b) => <option key={b}>{b}</option>)}
-          {f.branch && !(BRANCHES as readonly string[]).includes(f.branch) ? <option>{f.branch}</option> : null}
+          <option value={BRANCH_OTHER}>Other / Enter your branch</option>
         </select>
+        {branchOther ? <input aria-label="Your branch or specialization" value={f.branch} onChange={(e) => set("branch", e.target.value)} maxLength={120} placeholder="Type your branch or specialization" aria-invalid={errors.branch ? true : undefined} autoFocus={!profile.branch || (BRANCHES as readonly string[]).includes(profile.branch)} className={`rounded-md border bg-surface px-3 py-2.5 text-[15px] outline-none focus:border-primary focus:shadow-[0_0_0_3px_var(--focus-ring)] ${errors.branch ? "border-gap-critical" : "border-border"}`} /> : null}
         {errors.branch ? <p role="alert" className="text-[13px] text-rose-700">{errors.branch}</p> : null}
       </div>
       <fieldset className="flex flex-col gap-1.5">

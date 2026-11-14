@@ -3,13 +3,17 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { generateQuestions } from "@/lib/ai/features";
 import { dbLogger } from "@/lib/ai/log";
 import { sanitizeLabel } from "@/lib/sanitize";
-import { QUESTIONS_PER_SKILL } from "@/lib/scoring";
 
-const GENERATE_COUNT = 8;
+/**
+ * Each skill needs a pool several times larger than one test (QUESTIONS_PER_SKILL) so that retakes and
+ * different students get different questions. With a pool of exactly 5 every test is identical.
+ */
+export const QUESTION_POOL_TARGET = 20;
+const GENERATE_COUNT = 10;
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (m) => `\\${m}`);
 
 /**
- * Makes sure each skill has at least QUESTIONS_PER_SKILL active questions, generating missing ones
+ * Makes sure each skill has a pool of QUESTION_POOL_TARGET active questions (a test needs at least QUESTIONS_PER_SKILL), generating missing ones
  * with the NVIDIA model. Students cannot write to the bank, so this runs with the service role
  * after the caller has been authenticated. Returns the number of active questions per skill.
  */
@@ -37,9 +41,9 @@ export async function ensureQuestionBank(skills: string[], userId: string | null
         (await admin.from("questions").select("id", { count: "exact", head: true }).eq("skill_id", skillId).eq("status", "active")).count ?? 0;
 
       let have = await countActive();
-      if (have < QUESTIONS_PER_SKILL) {
+      if (have < QUESTION_POOL_TARGET) {
         try {
-          const { questions, model } = await generateQuestions(canonical, GENERATE_COUNT, log);
+          const { questions, model } = await generateQuestions(canonical, Math.min(GENERATE_COUNT, QUESTION_POOL_TARGET - have), log);
           for (const q of questions) {
             const ins = await admin
               .from("questions")

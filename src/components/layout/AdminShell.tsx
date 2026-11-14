@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Logo } from "@/components/ui/Logo";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { cn } from "@/components/ui/cn";
-import { initials } from "@/lib/format";
+import { NotificationBell, ProfileMenu } from "@/components/layout/HeaderMenus";
 
 const NAV: { href: string; label: string; icon: IconName; badge?: "queue" | "deletions" | "notifs" }[] = [
   { href: "/admin", label: "Dashboard", icon: "layout-dashboard" },
@@ -19,7 +19,7 @@ const NAV: { href: string; label: string; icon: IconName; badge?: "queue" | "del
   { href: "/admin/settings", label: "Settings", icon: "settings" },
 ];
 
-export function AdminShell({ name, counts, children }: { name: string; counts: { queue: number; deletions: number; notifs: number }; children: React.ReactNode }) {
+export function AdminShell({ name, email, counts, children }: { name: string; email: string; counts: { queue: number; deletions: number; notifs: number }; children: React.ReactNode }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [path]);
@@ -58,8 +58,8 @@ export function AdminShell({ name, counts, children }: { name: string; counts: {
           <span className="font-display text-[15px] font-semibold text-ink-2">{current?.label ?? "Admin"}</span>
         </div>
         <div className="flex items-center gap-3">
-          <Link href="/admin/notifications" aria-label={counts.notifs ? `Notifications, ${counts.notifs} unread` : "Notifications"} className="relative grid size-11 place-items-center rounded-lg border border-border bg-surface"><Icon name="bell" />{counts.notifs > 0 ? <span className="absolute -right-1 -top-1 grid min-w-5 place-items-center rounded-full bg-rose-500 px-1 text-[11px] font-bold text-white">{counts.notifs}</span> : null}</Link>
-          <form action="/auth/signout" method="post"><button className="inline-flex h-11 items-center gap-2 rounded-lg border border-border bg-surface px-3 font-display text-sm font-semibold" aria-label={`Log out ${name}`}><span className="grid size-7 place-items-center rounded-full bg-primary text-xs font-bold text-white">{initials(name)}</span><span className="hidden sm:inline">Log out</span></button></form>
+          <NotificationBell unread={counts.notifs} allHref="/admin/notifications" />
+          <ProfileMenu name={name} email={email} profileHref="/admin/settings" profileLabel="Settings & password" />
         </div>
       </header>
       <main id="main" className="mx-auto max-w-[1280px] px-4 pb-14 pt-6 lg:px-10 lg:pt-8">{children}</main>

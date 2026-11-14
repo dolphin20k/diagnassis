@@ -15,9 +15,12 @@ const body = z
   .object({
     roleId: z.string().uuid().nullable().optional(),
     customRole: z.string().trim().min(2).max(80).nullable().optional(),
-    skills: z.array(z.string().max(80)).min(1).max(60),
+    skills: z.array(z.string().max(80)).max(60).default([]),
+    /** "I don't know any of these skills": a valid diagnostic with nothing claimed; result + beginner roadmap straight away. */
+    beginner: z.boolean().optional(),
   })
-  .refine((b) => !!b.roleId !== !!b.customRole, { message: "Provide either a curated role or a custom role" });
+  .refine((b) => !!b.roleId !== !!b.customRole, { message: "Provide either a curated role or a custom role" })
+  .refine((b) => b.beginner === true || b.skills.length >= 1, { message: "Choose at least one skill or the beginner option" });
 
 /**
  * Prepares a diagnostic: finds the skills that will be tested, tops up the AI question bank for them,
@@ -29,8 +32,9 @@ export async function POST(req: Request) {
   const parsed = body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return json({ error: "invalid_request", message: "Choose a role and at least one skill." }, 400);
   const { roleId, customRole } = parsed.data;
-  const skills = sanitizeSkillList(parsed.data.skills);
-  if (skills.length === 0) return json({ error: "invalid_request", message: "Add at least one skill you already have." }, 400);
+  const beginner = parsed.data.beginner === true;
+  const skills = beginner ? [] : sanitizeSkillList(parsed.data.skills);
+  if (!beginner && skills.length === 0) return json({ error: "invalid_request", message: "Add at least one skill you already have." }, 400);
 
   // Requirements the attempt will snapshot (same source as start_attempt).
   let reqs: Pick<RequirementSnapshot, "skill" | "weight">[] = [];
@@ -45,27 +49,36 @@ export async function POST(req: Request) {
   }
   if (reqs.length === 0) return json({ error: "role_not_ready", message: friendlyError(customRole ? "custom_role_not_estimated" : "role_has_no_skills") }, 422);
 
-  const claimed = new Set(skills.map((s) => s.toLowerCase()));
-  const candidates = reqs.filter((r) => claimed.has(r.skill.toLowerCase())).slice(0, MAX_TESTED_SKILLS).map((r) => r.skill);
-  if (candidates.length === 0) return json({ error: "no_testable_skills", message: friendlyError("no_testable_skills") }, 422);
+  if (!beginner) {
+    const claimed = new Set(skills.map((s) => s.toLowerCase()));
+    const candidates = reqs.filter((r) => claimed.has(r.skill.toLowerCase())).slice(0, MAX_TESTED_SKILLS).map((r) => r.skill);
+    if (candidates.length === 0) return json({ error: "no_testable_skills", message: friendlyError("no_testable_skills") }, 422);
 
-  if (!(await withinRateLimit(ctx.user.id, "questions", 40))) {
-    return json({ error: "rate_limited", message: "You have started a lot of tests recently. Try again in a little while." }, 429);
-  }
-  const counts = await ensureQuestionBank(candidates, ctx.user.id);
-  if (!candidates.some((s) => (counts[s] ?? 0) >= QUESTIONS_PER_SKILL)) {
-    return json({ error: "questions_unavailable", message: "We could not prepare questions for your skills right now. Please try again in a moment." }, 503);
+    if (!(await withinRateLimit(ctx.user.id, "questions", 40))) {
+      return json({ error: "rate_limited", message: "You have started a lot of tests recently. Try again in a little while." }, 429);
+    }
+    const counts = await ensureQuestionBank(candidates, ctx.user.id);
+    if (!candidates.some((s) => (counts[s] ?? 0) >= QUESTIONS_PER_SKILL)) {
+      return json({ error: "questions_unavailable", message: "We could not prepare questions for your skills right now. Please try again in a moment." }, 503);
+    }
   }
 
   const { data: attemptId, error } = await ctx.supabase.rpc("start_attempt", {
     p_role_id: roleId ?? null,
     p_custom_role: customRole ?? null,
     p_skills: skills,
+    p_beginner: beginner,
   });
   if (error) {
     const code = error.message.trim();
     const status = code === "attempt_in_progress" || code === "attempt_limit_reached" ? 409 : isKnownCode(code) ? 422 : 500;
     return json({ error: code, message: friendlyError(code) }, status);
+  }
+  if (beginner) {
+    // Nothing to test: score it now (every skill counts as missing) so the student lands on their roadmap.
+    const submitted = await ctx.supabase.rpc("submit_attempt", { p_attempt: attemptId });
+    if (submitted.error) return json({ error: "submit_failed", message: "We could not build your roadmap. Please try again." }, 500);
+    return json({ attemptId, completed: true });
   }
   return json({ attemptId });
 }

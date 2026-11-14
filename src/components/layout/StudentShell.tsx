@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import { Logo } from "@/components/ui/Logo";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { cn } from "@/components/ui/cn";
-import { initials } from "@/lib/format";
+import { NotificationBell, ProfileMenu } from "@/components/layout/HeaderMenus";
 
 const NAV: { href: string; label: string; icon: IconName }[] = [
   { href: "/dashboard", label: "Dashboard", icon: "layout-dashboard" },
@@ -26,7 +26,7 @@ const FOCUS = /^\/diagnostic\/[0-9a-f-]{36}/;
 
 const isActive = (path: string, href: string) => path === href || path.startsWith(href + "/");
 
-export function StudentShell({ name, unread, attemptsLeft, limit, children }: { name: string; unread: number; attemptsLeft: number; limit: number; children: React.ReactNode }) {
+export function StudentShell({ name, email, unread, attemptsLeft, limit, children }: { name: string; email: string; unread: number; attemptsLeft: number; limit: number; children: React.ReactNode }) {
   const path = usePathname();
   if (FOCUS.test(path)) return <main id="main" className="min-h-dvh bg-bg">{children}</main>;
   const title = TITLES[Object.keys(TITLES).find((k) => isActive(path, k)) ?? ""] ?? "";
@@ -58,11 +58,8 @@ export function StudentShell({ name, unread, attemptsLeft, limit, children }: { 
         <Link href="/dashboard" className="md:hidden" aria-label="DIAGNASSIS dashboard"><Logo height={30} /></Link>
         <span className="hidden font-display text-[15px] font-semibold text-ink-2 md:block">{title}</span>
         <div className="flex items-center gap-3">
-          <Link href="/notifications" aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"} className="relative grid size-11 place-items-center rounded-lg border border-border bg-surface text-ink hover:bg-slate-50">
-            <Icon name="bell" />
-            {unread > 0 ? <span className="absolute -right-1 -top-1 grid min-w-5 place-items-center rounded-full bg-rose-500 px-1 text-[11px] font-bold text-white">{unread}</span> : null}
-          </Link>
-          <Link href="/profile" aria-label="My profile" className="grid size-11 place-items-center rounded-full bg-primary font-display text-sm font-bold text-white">{initials(name)}</Link>
+          <NotificationBell unread={unread} allHref="/notifications" />
+          <ProfileMenu name={name} email={email} profileHref="/profile" settingsHref="/settings" />
         </div>
       </header>
 

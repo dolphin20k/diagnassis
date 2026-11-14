@@ -14,7 +14,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     supabase.from("notifications").select("id", { count: "exact", head: true }).is("read_at", null),
   ]);
   return (
-    <AdminShell name={profile.full_name || profile.email} counts={{ queue: (sug.count ?? 0) + (typed.count ?? 0), deletions: del.count ?? 0, notifs: notifs.count ?? 0 }}>
+    <AdminShell name={profile.full_name || profile.email} email={profile.email} counts={{ queue: (sug.count ?? 0) + (typed.count ?? 0), deletions: del.count ?? 0, notifs: notifs.count ?? 0 }}>
       {children}
     </AdminShell>
   );

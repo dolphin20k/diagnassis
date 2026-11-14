@@ -19,7 +19,7 @@ export default async function StudentLayout({ children }: { children: React.Reac
   const roleLabel = await getTargetRoleLabel(profile);
   const showDetails = !profile.details_completed && !profile.details_skipped;
   return (
-    <StudentShell name={profile.full_name || profile.email} unread={unread} attemptsLeft={Math.max(0, limit - attempts.length)} limit={limit}>
+    <StudentShell name={profile.full_name || profile.email} email={profile.email} unread={unread} attemptsLeft={Math.max(0, limit - attempts.length)} limit={limit}>
       {children}
       {showDetails ? <DetailsGate profile={profile} roles={catalog.roles} skills={catalog.skills} roleLabel={roleLabel} /> : null}
     </StudentShell>

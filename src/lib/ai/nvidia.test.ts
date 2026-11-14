@@ -84,6 +84,24 @@ describe("callJson", () => {
     await expect(callJson({ ...base, fetchImpl: f as unknown as typeof fetch })).rejects.toMatchObject({ code: "empty" });
   });
 
+  it("moves to the next model when the configured one is retired (410)", async () => {
+    const f = vi.fn().mockResolvedValueOnce(new Response("gone", { status: 410 })).mockResolvedValueOnce(reply('{"n": 2}'));
+    const out = await callJson({ ...base, fetchImpl: f as unknown as typeof fetch });
+    expect(out.data.n).toBe(2);
+    const models = f.mock.calls.map((c) => JSON.parse((c[1] as RequestInit).body as string).model);
+    expect(models[0]).not.toBe(models[1]);
+  });
+
+  it("fails clearly when every candidate model is retired", async () => {
+    const f = vi.fn().mockImplementation(async () => new Response("gone", { status: 410 }));
+    await expect(callJson({ ...base, fetchImpl: f as unknown as typeof fetch })).rejects.toMatchObject({ code: "http", status: 410 });
+  });
+
+  it("ignores <think> reasoning blocks before the JSON", async () => {
+    const f = vi.fn().mockResolvedValue(reply('<think>let me {think}</think>{"n": 5}'));
+    expect((await callJson({ ...base, fetchImpl: f as unknown as typeof fetch })).data.n).toBe(5);
+  });
+
   it("throws when the API key is not configured", async () => {
     delete process.env.NVIDIA_API_KEY;
     await expect(callJson({ ...base, fetchImpl: vi.fn() as unknown as typeof fetch })).rejects.toThrow();

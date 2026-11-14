@@ -11,26 +11,60 @@ import type { AdminAnalytics, Band } from "@/lib/types/database";
 export const metadata: Metadata = { title: "Analytics" };
 const RANGES = [30, 90, 365];
 
-function DailyChart({ daily }: { daily: AdminAnalytics["daily"] }) {
-  const W = 720, H = 200, P = { l: 32, r: 8, t: 12, b: 24 };
-  const max = Math.max(1, ...daily.map((d) => Math.max(d.registrations, d.diagnostics)));
-  const bw = (W - P.l - P.r) / Math.max(1, daily.length);
-  const y = (v: number) => P.t + (1 - v / max) * (H - P.t - P.b);
-  const summary = `Daily registrations and completed diagnostics. Total registrations ${daily.reduce((a, d) => a + d.registrations, 0)}, diagnostics ${daily.reduce((a, d) => a + d.diagnostics, 0)}.`;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "2026-11-11" -> "11 Nov" (or "11 Nov 2026" when `year`). Parsed by hand so no timezone shifts the date. */
+const label = (iso: string, year = false) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${d} ${MONTHS[(m ?? 1) - 1]}${year ? ` ${y}` : ""}`;
+};
+
+/** Line chart of registrations and completed diagnostics per day, with dated axis ticks, value labels and a per-date table. */
+function DailyChart({ daily: all }: { daily: AdminAnalytics["daily"] }) {
+  // Long ranges with little activity would squash everything into the last few pixels: start the axis a few days before
+  // the first activity (never fewer than 14 days shown) while the totals and the date table still cover the whole range.
+  const first = all.findIndex((d) => d.registrations > 0 || d.diagnostics > 0);
+  const from = first < 0 ? Math.max(0, all.length - 14) : Math.max(0, Math.min(first - 2, all.length - 14));
+  const daily = all.slice(from);
+  const W = 720, H = 260, P = { l: 36, r: 16, t: 20, b: 34 };
+  const maxVal = Math.max(1, ...daily.map((d) => Math.max(d.registrations, d.diagnostics)));
+  const top = Math.max(2, maxVal);
+  const n = daily.length;
+  const x = (i: number) => P.l + (n <= 1 ? (W - P.l - P.r) / 2 : (i / (n - 1)) * (W - P.l - P.r));
+  const y = (v: number) => P.t + (1 - v / top) * (H - P.t - P.b);
+  const yTicks = Array.from({ length: top + 1 }, (_, i) => i).filter((v) => top <= 5 || v % Math.ceil(top / 5) === 0);
+  const xTickCount = n <= 10 ? n : 7;
+  const xTicks = Array.from({ length: xTickCount }, (_, k) => (xTickCount === 1 ? 0 : Math.round((k * (n - 1)) / (xTickCount - 1))));
+  const totalReg = all.reduce((a, d) => a + d.registrations, 0);
+  const totalDia = all.reduce((a, d) => a + d.diagnostics, 0);
+  const summary = `Daily registrations and completed diagnostics from ${daily[0] ? label(daily[0].day, true) : ""} to ${daily.at(-1) ? label(daily.at(-1)!.day, true) : ""}. Total registrations ${totalReg}, completed diagnostics ${totalDia}.`;
+  const line = (key: "registrations" | "diagnostics") => daily.map((d, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(d[key]).toFixed(1)}`).join(" ");
+  const series = [
+    { key: "registrations" as const, color: "#4F46E5", name: "registrations", dy: -8 },
+    { key: "diagnostics" as const, color: "#06B6D4", name: "completed diagnostics", dy: 16 },
+  ];
+  const active = all.filter((d) => d.registrations > 0 || d.diagnostics > 0);
   return (
     <figure>
       <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label={summary}>
-        {[0, 0.5, 1].map((g) => <g key={g}><line x1={P.l} x2={W - P.r} y1={y(max * g)} y2={y(max * g)} stroke="#E2E8F0" /><text x={P.l - 6} y={y(max * g) + 4} textAnchor="end" fontSize="10" fill="#94A3B8">{Math.round(max * g)}</text></g>)}
-        {daily.map((d, i) => (
-          <g key={d.day}>
-            <rect x={P.l + i * bw + bw * 0.1} width={Math.max(1, bw * 0.38)} y={y(d.registrations)} height={H - P.b - y(d.registrations)} fill="#4F46E5" rx="1"><title>{d.day}: {d.registrations} registrations</title></rect>
-            <rect x={P.l + i * bw + bw * 0.52} width={Math.max(1, bw * 0.38)} y={y(d.diagnostics)} height={H - P.b - y(d.diagnostics)} fill="#06B6D4" rx="1"><title>{d.day}: {d.diagnostics} diagnostics</title></rect>
+        {yTicks.map((v) => <g key={v}><line x1={P.l} x2={W - P.r} y1={y(v)} y2={y(v)} stroke="#E2E8F0" /><text x={P.l - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="#64748B">{v}</text></g>)}
+        {xTicks.map((i, k) => <g key={i}><line x1={x(i)} x2={x(i)} y1={H - P.b} y2={H - P.b + 4} stroke="#94A3B8" /><text x={x(i)} y={H - 12} textAnchor={k === 0 && n > 1 ? "start" : k === xTicks.length - 1 && n > 1 ? "end" : "middle"} fontSize="11" fill="#64748B">{label(daily[i]!.day)}</text></g>)}
+        {series.map((sr) => <path key={sr.key} d={line(sr.key)} fill="none" stroke={sr.color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />)}
+        {series.map((sr) => daily.map((d, i) => d[sr.key] > 0 ? (
+          <g key={`${sr.key}-${d.day}`}>
+            <circle cx={x(i)} cy={y(d[sr.key])} r="4.5" fill="#fff" stroke={sr.color} strokeWidth="2.5"><title>{`${label(d.day, true)}: ${d[sr.key]} ${sr.name}`}</title></circle>
+            <text x={x(i)} y={y(d[sr.key]) + sr.dy} textAnchor="middle" fontSize="11" fontWeight="700" fill={sr.color}>{d[sr.key]}</text>
           </g>
-        ))}
-        <text x={P.l} y={H - 6} fontSize="10" fill="#64748B">{daily[0]?.day}</text>
-        <text x={W - P.r} y={H - 6} textAnchor="end" fontSize="10" fill="#64748B">{daily.at(-1)?.day}</text>
+        ) : null))}
       </svg>
-      <figcaption className="mt-2 flex gap-5 text-xs text-ink-2"><span><i className="mr-1.5 inline-block size-2.5 rounded-sm bg-primary" />Registrations</span><span><i className="mr-1.5 inline-block size-2.5 rounded-sm bg-cyan" />Completed diagnostics</span></figcaption>
+      <figcaption className="mt-2 flex flex-wrap gap-5 text-xs text-ink-2"><span><i className="mr-1.5 inline-block h-1 w-4 rounded-full bg-primary align-middle" />Registrations ({totalReg})</span><span><i className="mr-1.5 inline-block h-1 w-4 rounded-full bg-cyan align-middle" />Completed diagnostics ({totalDia})</span></figcaption>
+      {from > 0 ? <p className="mt-1 text-xs text-ink-2">Chart starts {label(daily[0]!.day, true)}; there was no activity earlier in this range.</p> : null}
+      {active.length > 0 ? (
+        <table className="mt-4 w-full text-left text-sm">
+          <caption className="mb-1 text-left text-[13px] font-semibold">Activity by date</caption>
+          <thead><tr className="text-xs uppercase text-ink-2"><th scope="col" className="pb-1.5 font-semibold">Date</th><th scope="col" className="pb-1.5 font-semibold">Registrations</th><th scope="col" className="pb-1.5 font-semibold">Completed diagnostics</th></tr></thead>
+          <tbody className="divide-y divide-border">{[...active].reverse().map((d) => <tr key={d.day}><th scope="row" className="py-1.5 font-semibold">{label(d.day, true)}</th><td className="py-1.5 tabular-nums">{d.registrations}</td><td className="py-1.5 tabular-nums">{d.diagnostics}</td></tr>)}</tbody>
+        </table>
+      ) : <p className="mt-3 text-sm text-ink-2">No registrations or completed diagnostics in this range yet.</p>}
     </figure>
   );
 }
@@ -54,7 +88,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ d
     <div className="flex flex-col gap-6">
       <PageHeader title="Analytics" action={<nav aria-label="Date range" className="flex gap-2">{RANGES.map((r) => <Link key={r} href={`?days=${r}`} aria-current={r === days ? "true" : undefined} className={`rounded-full border px-4 py-1.5 text-sm font-semibold hover:no-underline ${r === days ? "border-primary bg-primary text-white hover:text-white" : "border-border bg-surface"}`}>{r} days</Link>)}</nav>} />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{stats.map(([l, v, s]) => <div key={l} className="rounded-lg bg-surface p-5 shadow-card"><p className="text-[13px] text-ink-2">{l}</p><p className="font-display text-[30px] font-extrabold leading-tight">{v}</p><p className="text-xs text-ink-2">{s}</p></div>)}</div>
-      <Card title="Diagnostic usage" subtitle="Registrations and completed diagnostics per day"><DailyChart daily={a.daily} /></Card>
+      <Card title="Diagnostic usage" subtitle="Registrations and completed diagnostics on each date"><DailyChart daily={a.daily} /></Card>
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Most common skill gaps" subtitle="Skills students most often miss or score weakly on">
           {a.common_gaps.length === 0 ? <p className="text-ink-2">Skill gaps appear once students complete diagnostics.</p> : <div className="flex flex-col gap-3">{a.common_gaps.map((g) => <SkillBar key={g.skill} label={g.skill} value={Math.round((g.total / maxGap) * 100)} status="weak" trailing={`${g.total} (${g.missing} missing)`} />)}</div>}

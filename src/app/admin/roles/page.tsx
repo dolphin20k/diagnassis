@@ -55,7 +55,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ t
         <div className="flex flex-col gap-4">
           <Card>
             <p className="text-[15px]">Suggested by the automatic market research that runs every 2 days. Changes are reviewed and applied by AI on the following run, and every change is bounded so a single run can never reshape a role. Research uses the AI model&apos;s general knowledge, not live job-listing data.</p>
-            <div className="mt-4"><RunResearch last={last ? { status: last.status, startedAt: last.started_at, created: last.suggestions_created, applied: last.suggestions_applied } : null} /></div>
+            <div className="mt-4"><RunResearch last={last ? { status: last.status, startedAt: last.started_at, created: last.suggestions_created, applied: last.suggestions_applied, error: last.error } : null} /></div>
           </Card>
           {sugs.length === 0 ? <StateBlock icon="sparkles" title="No suggestions yet" body="Suggestions appear after the first automatic research run." /> : (
             <ul className="grid gap-3">

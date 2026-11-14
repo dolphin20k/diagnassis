@@ -7,6 +7,7 @@ import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Toast";
+import { ChangePasswordCard } from "@/components/ui/ChangePasswordCard";
 import { setAttemptLimit } from "@/app/admin/actions";
 import { updateSettings } from "@/app/(student)/actions";
 import type { NotificationPrefs } from "@/lib/types/database";
@@ -19,7 +20,7 @@ const PREFS: [keyof NotificationPrefs, string, string][] = [
 ];
 interface Health { ai: { ok: boolean; model: string; detail: string }; r2: { configured: boolean }; cron: { secretConfigured: boolean }; serviceRole: { configured: boolean } }
 
-export function AdminSettings({ email, name, limit, prefs }: { email: string; name: string; limit: number; prefs: NotificationPrefs }) {
+export function AdminSettings({ email, name, limit, prefs, hasPassword }: { email: string; name: string; limit: number; prefs: NotificationPrefs; hasPassword: boolean }) {
   const router = useRouter();
   const { toast } = useToast();
   const [lim, setLim] = useState(String(limit));
@@ -54,6 +55,7 @@ export function AdminSettings({ email, name, limit, prefs }: { email: string; na
       <Card title="Diagnostic limit" subtitle="How many diagnostics each student can run in total.">
         <div className="flex flex-wrap items-end gap-3"><Field label="Attempts per student" type="number" min={1} max={50} value={lim} onChange={(e) => setLim(e.target.value)} error={err} className="w-48" /><Button onClick={saveLimit} disabled={lim === String(limit)}>Save limit</Button></div>
       </Card>
+      <ChangePasswordCard email={email} hasPassword={hasPassword} />
       <Card title="Notification preferences">
         <div className="divide-y divide-border">
           {PREFS.map(([k, l, d]) => (

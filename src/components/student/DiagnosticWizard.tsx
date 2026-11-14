@@ -24,7 +24,6 @@ export function DiagnosticWizard({ roles, catalog, requirements, initialSkills, 
   const [role, setRole] = useState<string>(initialRoleId ?? (initialOther ? OTHERS : ""));
   const [other, setOther] = useState(initialOther);
   const [skills, setSkills] = useState<string[]>(initialSkills);
-  const [none, setNone] = useState(false);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -61,21 +60,23 @@ export function DiagnosticWizard({ roles, catalog, requirements, initialSkills, 
     }
   }
 
-  async function start() {
+  /** `beginner`: "I don't know any of these skills" is a valid answer; the server scores it and returns a beginner roadmap. */
+  async function start(beginner = false) {
     setBusy(true);
     setErr("");
     try {
+      const target = role === OTHERS ? { customRole: estimate?.name ?? other.trim() } : { roleId: role };
       const res = await fetch("/api/diagnostics/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(role === OTHERS ? { customRole: estimate?.name ?? other.trim(), skills } : { roleId: role, skills }),
+        body: JSON.stringify(beginner ? { ...target, skills: [], beginner: true } : { ...target, skills }),
       });
       const body = await res.json();
       if (!res.ok) {
         if (body.error === "attempt_in_progress") return router.replace("/dashboard");
         return setErr(body.message ?? "We could not start your diagnostic. Please try again.");
       }
-      router.push(`/diagnostic/${body.attemptId}`);
+      router.push(body.completed ? `/results/${body.attemptId}` : `/diagnostic/${body.attemptId}`);
     } catch {
       setErr("Network problem. Check your connection and try again.");
     } finally {
@@ -123,26 +124,23 @@ export function DiagnosticWizard({ roles, catalog, requirements, initialSkills, 
                 const has = claimed.has(r.skill.toLowerCase());
                 return (
                   <li key={r.skill}>
-                    <button type="button" aria-pressed={has} onClick={() => { setNone(false); setSkills(has ? skills.filter((s) => s.toLowerCase() !== r.skill.toLowerCase()) : [...skills, r.skill]); }} className={cn("inline-flex items-center gap-1.5 rounded-full border-2 px-3 py-1.5 text-sm font-semibold", has ? "border-primary bg-indigo-50 text-primary-dark" : "border-border bg-white hover:border-indigo-300")}>
+                    <button type="button" aria-pressed={has} onClick={() => { setErr(""); setSkills(has ? skills.filter((s) => s.toLowerCase() !== r.skill.toLowerCase()) : [...skills, r.skill]); }} className={cn("inline-flex items-center gap-1.5 rounded-full border-2 px-3 py-1.5 text-sm font-semibold", has ? "border-primary bg-indigo-50 text-primary-dark" : "border-border bg-white hover:border-indigo-300")}>
                       {has ? <Icon name="check" size={14} /> : <Icon name="plus" size={14} />}{r.skill} <span className="font-normal text-ink-2">{Math.round(r.weight)}%</span>
                     </button>
                   </li>
                 );
               })}
             </ul>
-            <label className="mt-3 flex items-center gap-2.5 text-sm font-semibold">
-              <input type="checkbox" checked={none} onChange={(e) => { setNone(e.target.checked); if (e.target.checked) setSkills(skills.filter((s) => !reqs.some((r) => r.skill.toLowerCase() === s.toLowerCase()))); }} className="size-5 accent-[var(--primary)]" />
-              I don&apos;t know any of these skills
-            </label>
           </div>
-          <SkillPicker value={skills} onChange={(v) => { setSkills(v); setNone(false); }} catalog={catalog} label="All your skills" />
-          {none || tested.length === 0 ? (
-            <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4" role="status">
-              <p className="flex items-center gap-2 font-display font-bold text-amber-900"><Icon name="lightbulb" size={18} /> Nothing to test yet, and that is fine</p>
-              <p className="mt-1 text-sm text-amber-900">Start with {missing.slice(0, 3).map((m) => m.skill).join(", ") || "the skills listed above"}. These carry the most weight for {roleName}. Come back after a week of practice and your diagnostic will have something to measure.</p>
+          <SkillPicker value={skills} onChange={(v) => { setSkills(v); setErr(""); }} catalog={catalog} label="All your skills" />
+          <p className="mt-4 rounded-md bg-bg px-3 py-2 text-sm text-ink-2" role="note">Two ways forward: pick the skills you already know and press <strong>Continue</strong> to be tested on them, or press <strong>I don&apos;t know any of these skills</strong> to get a beginner roadmap for {roleName} straight away. Nothing is tested and you do not need to claim a skill.</p>
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+            <Button variant="secondary" onClick={() => setStep(0)} disabled={busy}>Back</Button>
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <Button variant="secondary" size="lg" onClick={() => start(true)} loading={busy} className="border-primary">{busy ? "Building your roadmap…" : "I don't know any of these skills"}</Button>
+              <Button size="lg" disabled={busy} onClick={() => { if (tested.length === 0) return setErr("Select at least one skill from the list above, or choose “I don't know any of these skills”."); setErr(""); setSkills(sanitizeSkillList(skills)); setStep(2); }}>Continue</Button>
             </div>
-          ) : null}
-          <div className="mt-6 flex justify-between gap-3"><Button variant="secondary" onClick={() => setStep(0)}>Back</Button><Button size="lg" onClick={() => { if (tested.length === 0) return setErr("Claim at least one skill this role asks for to take the test."); setErr(""); setSkills(sanitizeSkillList(skills)); setStep(2); }}>Continue</Button></div>
+          </div>
           {err ? <p role="alert" className="mt-3 text-right text-sm text-rose-700">{err}</p> : null}
         </Card>
       ) : null}
@@ -163,7 +161,7 @@ export function DiagnosticWizard({ roles, catalog, requirements, initialSkills, 
             <li className="flex gap-2"><Icon name="sparkles" size={16} className="mt-0.5 shrink-0" /> Questions are prepared with AI. Starting may take up to a minute the first time.</li>
           </ul>
           {err ? <p role="alert" className="mt-4 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-800">{err}</p> : null}
-          <div className="mt-6 flex justify-between gap-3"><Button variant="secondary" onClick={() => setStep(1)} disabled={busy}>Back</Button><Button size="lg" onClick={start} loading={busy}>{busy ? "Preparing your questions…" : "Start test"}</Button></div>
+          <div className="mt-6 flex justify-between gap-3"><Button variant="secondary" onClick={() => setStep(1)} disabled={busy}>Back</Button><Button size="lg" onClick={() => start()} loading={busy}>{busy ? "Preparing your questions…" : "Start test"}</Button></div>
         </Card>
       ) : null}
       <span className="sr-only-live" aria-live="polite">{busy ? "Working, please wait" : ""}</span>

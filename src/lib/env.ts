@@ -30,20 +30,38 @@ export function getServiceRoleKey(): string {
   return serverSchema.parse({ SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY }).SUPABASE_SERVICE_ROLE_KEY;
 }
 
+/**
+ * Chat models tried in order when none is configured, or when the configured one has been retired by NVIDIA
+ * (HTTP 404/410). `meta/llama-3.3-70b-instruct` was retired (410 Gone) which broke every AI feature.
+ */
+export const DEFAULT_AI_MODELS = [
+  "mistralai/mistral-large-2-instruct",
+  "nvidia/llama-3.1-nemotron-70b-instruct",
+  "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+  "mistralai/mistral-large",
+  "openai/gpt-oss-20b",
+];
+
 export interface AiEnv {
   apiKey: string;
   baseUrl: string;
+  /** First model to try. */
   model: string;
+  /** Ordered candidates: the configured NVIDIA_MODEL first, then DEFAULT_AI_MODELS. */
+  models: string[];
   timeoutMs: number;
 }
 
 export function getAiEnv(): AiEnv {
   const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) throw new AiNotConfiguredError();
+  const configured = (process.env.NVIDIA_MODEL || "").trim();
+  const models = [...new Set([configured, ...DEFAULT_AI_MODELS].filter(Boolean))];
   return {
     apiKey,
     baseUrl: (process.env.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1").replace(/\/+$/, ""),
-    model: process.env.NVIDIA_MODEL || "meta/llama-3.3-70b-instruct",
+    model: models[0] as string,
+    models,
     timeoutMs: Number(process.env.NVIDIA_TIMEOUT_MS) > 0 ? Number(process.env.NVIDIA_TIMEOUT_MS) : 25_000,
   };
 }

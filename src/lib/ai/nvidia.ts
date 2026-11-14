@@ -78,48 +78,68 @@ export function extractJson(text: string): unknown {
   throw new AiError("bad_json", "Unterminated JSON in model output");
 }
 
+/** Models that NVIDIA has retired or does not offer to this key; we move on to the next candidate. */
+const MODEL_GONE = new Set([404, 410]);
+
+/** Reasoning models wrap their chain of thought in <think> tags; it must not reach the JSON parser. */
+const stripThinking = (t: string) => t.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/^[\s\S]*<\/think>/i, "");
+
+// Remembers the model that last worked so later requests skip retired ones.
+let workingModel: string | null = null;
+
 async function complete(
   messages: ChatMessage[],
   opts: { maxTokens: number; temperature: number; fetchImpl: typeof fetch },
 ): Promise<{ text: string; model: string }> {
   const env = getAiEnv();
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), env.timeoutMs);
-  try {
-    let res: Response | null = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      res = await opts.fetchImpl(`${env.baseUrl}/chat/completions`, {
-        method: "POST",
-        signal: ctrl.signal,
-        headers: { Authorization: `Bearer ${env.apiKey}`, "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({
-          model: env.model,
-          messages,
-          temperature: opts.temperature,
-          top_p: 0.9,
-          max_tokens: opts.maxTokens,
-          stream: false,
-        }),
-      });
-      if (res.status !== 429 && res.status < 500) break;
-      await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+  const candidates = workingModel && env.models.includes(workingModel) ? [workingModel, ...env.models.filter((m) => m !== workingModel)] : env.models;
+  let lastStatus: number | undefined;
+  for (const model of candidates) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), env.timeoutMs);
+    try {
+      let res: Response | null = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        res = await opts.fetchImpl(`${env.baseUrl}/chat/completions`, {
+          method: "POST",
+          signal: ctrl.signal,
+          headers: { Authorization: `Bearer ${env.apiKey}`, "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: opts.temperature,
+            top_p: 0.9,
+            max_tokens: opts.maxTokens,
+            stream: false,
+          }),
+        });
+        if (res.status !== 429 && res.status < 500) break;
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+      }
+      if (!res) throw new AiError("http", "No response");
+      if (MODEL_GONE.has(res.status)) {
+        lastStatus = res.status;
+        if (workingModel === model) workingModel = null;
+        continue; // retired / unavailable model: try the next candidate
+      }
+      if (!res.ok) {
+        // Never echo the response body: it can contain request details.
+        throw new AiError("http", `NVIDIA API responded with ${res.status}`, res.status);
+      }
+      const body = (await res.json()) as { choices?: { message?: { content?: string } }[]; model?: string };
+      const text = stripThinking(body.choices?.[0]?.message?.content ?? "");
+      if (!text.trim()) throw new AiError("empty", "Model returned no content");
+      workingModel = model;
+      return { text, model: body.model || model };
+    } catch (e) {
+      if (e instanceof AiError) throw e;
+      if (e instanceof Error && e.name === "AbortError") throw new AiError("timeout", "NVIDIA API request timed out");
+      throw new AiError("http", "Could not reach the NVIDIA API");
+    } finally {
+      clearTimeout(timer);
     }
-    if (!res) throw new AiError("http", "No response");
-    if (!res.ok) {
-      // Never echo the response body: it can contain request details.
-      throw new AiError("http", `NVIDIA API responded with ${res.status}`, res.status);
-    }
-    const body = (await res.json()) as { choices?: { message?: { content?: string } }[]; model?: string };
-    const text = body.choices?.[0]?.message?.content;
-    if (!text || !text.trim()) throw new AiError("empty", "Model returned no content");
-    return { text, model: body.model || env.model };
-  } catch (e) {
-    if (e instanceof AiError) throw e;
-    if (e instanceof Error && e.name === "AbortError") throw new AiError("timeout", "NVIDIA API request timed out");
-    throw new AiError("http", "Could not reach the NVIDIA API");
-  } finally {
-    clearTimeout(timer);
   }
+  throw new AiError("http", `No available NVIDIA model (last status ${lastStatus ?? "unknown"}). Set NVIDIA_MODEL to a model your key can use`, lastStatus);
 }
 
 export async function callJson<T>(o: JsonCallOptions<T>): Promise<{ data: T; model: string }> {

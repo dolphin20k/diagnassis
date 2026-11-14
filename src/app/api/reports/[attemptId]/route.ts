@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { putReport, r2Configured, reportExists, reportKey, signedReportUrl } from "@/lib/r2";
 import { renderReportPdf } from "@/lib/report/pdf";
 import { getApiUser, json, UUID } from "@/lib/server/api";
+import { attachVideos } from "@/lib/server/youtube";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -58,7 +59,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ attempt
       isCustomRole: attempt.is_custom_role,
       takenAt: attempt.submitted_at,
       result: attempt.result,
-      insights: attempt.insights,
+      insights: attempt.insights ? { ...attempt.insights, actions: await attachVideos(attempt.insights.actions).catch(() => attempt.insights!.actions) } : null,
       declining: attempt.declining_skills,
       trendsUpdatedAt: attempt.trends_updated_at,
     });

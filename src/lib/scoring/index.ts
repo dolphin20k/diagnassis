@@ -43,7 +43,7 @@ export function searchUrl(query: string, kind: string): string {
   return kind === "video" ? `https://www.youtube.com/results?search_query=${q}` : `https://www.google.com/search?q=${q}`;
 }
 
-export function fallbackAction(role: string, row: ResultRow): ActionItem {
+export function fallbackAction(role: string, row: ResultRow, beginner = false): ActionItem {
   const rising = row.trend === "rising";
   return {
     skill: row.skill,
@@ -51,11 +51,15 @@ export function fallbackAction(role: string, row: ResultRow): ActionItem {
     priority: row.priority,
     trend: row.trend,
     why:
-      row.status === "missing"
+      beginner
+        ? `${row.skill} is one of the core skills for ${role} (${Math.round(row.weight)}% of the readiness score, ${row.priority} priority).${rising ? " Demand for it is rising." : ""} Starting here builds your foundation.`
+        : row.status === "missing"
         ? `${role} listings ask for ${row.skill} (${row.priority} priority) and it is not on your profile yet.${rising ? " Demand for it is rising." : ""}`
         : `You scored ${row.proficiency}% on ${row.skill}. It carries ${Math.round(row.weight)}% of the ${role} score, so improving it lifts your result directly.`,
     next_step:
-      row.status === "missing"
+      beginner
+        ? `Spend your first 1-2 weeks on the basics of ${row.skill} with a beginner course, then build one tiny project with it.`
+        : row.status === "missing"
         ? `Learn the basics of ${row.skill}, then build one small project that uses it.`
         : `Review the questions you missed on ${row.skill} and practise with short exercises.`,
     resources: [
@@ -64,6 +68,11 @@ export function fallbackAction(role: string, row: ResultRow): ActionItem {
     ],
     ai_generated: false,
   };
+}
+
+export function fallbackBeginnerSummary(role: string, skills: string[]): string {
+  const list = skills.slice(0, 3).join(", ");
+  return `You are starting from scratch for ${role}, and that is a perfectly good place to begin. ${list ? `Learn ${list} first: they carry the most weight for this role. ` : ""}Take the steps below in order, then run the diagnostic again to see your progress.`;
 }
 
 export function fallbackTrendSummary(role: string, result: AttemptResult, declining: string[]): string {

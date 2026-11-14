@@ -1,6 +1,7 @@
 import { buildInsights } from "@/lib/ai/features";
 import { dbLogger, withinRateLimit } from "@/lib/ai/log";
 import { getApiUser, json, UUID } from "@/lib/server/api";
+import { attachVideos } from "@/lib/server/youtube";
 import type { Json } from "@/lib/types/database";
 
 export const runtime = "nodejs";
@@ -21,6 +22,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const budgetOk = await withinRateLimit(ctx.user.id, "insights", 20);
   const insights = await buildInsights(attempt.role_name, attempt.result, attempt.declining_skills, { log: dbLogger(ctx.user.id), useAi: budgetOk }).catch(() => null);
   if (!insights) return json({ error: "insights_failed" }, 500);
+  insights.actions = await attachVideos(insights.actions).catch(() => insights.actions);
   const { error } = await ctx.supabase.rpc("save_attempt_insights", { p_attempt: id, p_insights: insights as unknown as Json });
   if (error) return json({ error: "save_failed" }, 500);
   return json({ insights });

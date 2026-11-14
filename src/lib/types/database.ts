@@ -102,7 +102,7 @@ export interface ActionItem {
   trend: SkillTrend | null;
   why: string;
   next_step: string;
-  resources: { title: string; kind: string; search_query: string; level: string | null }[];
+  resources: { title: string; kind: string; search_query: string; level: string | null; video_id?: string | null; video_title?: string | null; channel?: string | null }[];
   ai_generated: boolean;
 }
 export interface AttemptInsights {
@@ -327,7 +327,7 @@ export type Database = {
       is_admin: { Args: Record<string, never>; Returns: boolean };
       pending_policies: { Args: Record<string, never>; Returns: { id: string; type: PolicyType; version: string }[] };
       accept_policies: { Args: { p_policy_ids: string[] }; Returns: undefined };
-      start_attempt: { Args: { p_role_id: string | null; p_custom_role: string | null; p_skills: string[] }; Returns: string };
+      start_attempt: { Args: { p_role_id: string | null; p_custom_role: string | null; p_skills: string[]; p_beginner?: boolean }; Returns: string };
       save_answer: { Args: { p_attempt: string; p_position: number; p_selected?: number | null; p_flagged?: boolean | null }; Returns: undefined };
       submit_attempt: { Args: { p_attempt: string }; Returns: AttemptResult };
       save_attempt_insights: { Args: { p_attempt: string; p_insights: Json }; Returns: undefined };

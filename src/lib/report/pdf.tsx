@@ -1,7 +1,7 @@
 import "server-only";
 import path from "node:path";
 import fs from "node:fs";
-import { Document, Font, Image, Page, StyleSheet, Svg, Circle, Text, View, renderToBuffer } from "@react-pdf/renderer";
+import { Document, Font, Image, Link, Page, StyleSheet, Svg, Circle, Text, View, renderToBuffer } from "@react-pdf/renderer";
 import type { AttemptInsights, AttemptResult } from "@/lib/types/database";
 import { BAND_COPY, deltaLabel, trendLabel } from "@/lib/scoring";
 
@@ -33,7 +33,9 @@ const C = { primary: "#4F46E5", text: "#0F172A", sub: "#64748B", border: "#E2E8F
 const s = StyleSheet.create({
   page: { padding: 40, fontFamily: "SourceSans", fontSize: 10, color: C.text, lineHeight: 1.4 },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderBottomWidth: 2, borderBottomColor: C.primary, paddingBottom: 12, marginBottom: 16 },
-  h1: { fontFamily: "Manrope", fontWeight: 800, fontSize: 20 },
+  // Explicit line height + bottom margin: the ExtraBold font reported a short line box, so the details line below was drawn over the title.
+  h1: { fontFamily: "Manrope", fontWeight: 800, fontSize: 20, lineHeight: 1.3, marginBottom: 8 },
+  meta: { color: C.sub, lineHeight: 1.5 },
   h2: { fontFamily: "Manrope", fontWeight: 700, fontSize: 13, marginTop: 14, marginBottom: 6 },
   muted: { color: C.sub },
   card: { backgroundColor: C.bg, borderRadius: 8, padding: 12, flexDirection: "row", gap: 16, alignItems: "center" },
@@ -100,7 +102,7 @@ function ReportDocument({ d }: { d: ReportData }) {
           </View>
         </View>
         <Text style={s.h1}>{d.role}</Text>
-        <Text style={s.muted}>{d.studentName}{d.college ? ` · ${d.college}` : ""} · Taken {fmt(d.takenAt)} · {result.tested_count} skills tested · {result.question_count} questions</Text>
+        <Text style={s.meta}>{d.studentName}{d.college ? ` · ${d.college}` : ""} · Taken {fmt(d.takenAt)} · {result.tested_count === 0 ? "Beginner roadmap (no skills claimed)" : `${result.tested_count} skills tested · ${result.question_count} questions`}</Text>
         {d.isCustomRole ? <Text style={{ color: C.attention, marginTop: 4 }}>Requirements for this role were estimated by AI and may be less precise than curated roles.</Text> : null}
 
         <View style={[s.card, { marginTop: 12 }]}>
@@ -139,15 +141,19 @@ function ReportDocument({ d }: { d: ReportData }) {
 
         {d.insights && d.insights.actions.length > 0 ? (
           <View break>
-            <Text style={s.h2}>Your top {d.insights.actions.length} things to work on</Text>
+            <Text style={s.h2}>{result.tested_count === 0 ? `Your beginner roadmap (${d.insights.actions.length} steps)` : `Your top ${d.insights.actions.length} things to work on`}</Text>
             {d.insights.actions.map((a, i) => (
               <View key={a.skill} style={s.action} wrap={false}>
                 <Text style={{ fontFamily: "Manrope", fontWeight: 700, fontSize: 11 }}>{i + 1}. {a.skill}  <Text style={{ color: STATUS_COLOR[a.status === "missing" ? "missing" : "weak"], fontSize: 9 }}>{STATUS_LABEL[a.status]} · {a.priority} priority · {trendLabel(a.trend)}</Text></Text>
                 <Text style={{ marginTop: 3 }}>{a.why}</Text>
                 <Text style={{ marginTop: 3, fontWeight: 600 }}>Next step: <Text style={{ fontWeight: 400 }}>{a.next_step}</Text></Text>
-                {a.resources.map((r) => (
-                  <Text key={r.title} style={s.muted}>• {r.title} (search: “{r.search_query}”)</Text>
-                ))}
+                {a.resources.map((r) =>
+                  r.kind === "video" && r.video_id && /^[A-Za-z0-9_-]{11}$/.test(r.video_id) ? (
+                    <Link key={r.title} src={`https://www.youtube.com/watch?v=${r.video_id}`} style={{ color: C.primary, textDecoration: "none" }}>• {r.video_title ?? r.title} (YouTube{r.channel ? ` · ${r.channel}` : ""})</Link>
+                  ) : (
+                    <Text key={r.title} style={s.muted}>• {r.title} (search: “{r.search_query}”)</Text>
+                  ),
+                )}
               </View>
             ))}
             {!d.insights.ai_generated ? <Text style={[s.muted, { fontSize: 8 }]}>Standard guidance was used because AI-written advice was unavailable when this result was generated.</Text> : null}

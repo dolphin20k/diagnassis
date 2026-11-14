@@ -2,15 +2,14 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, PasswordField, PasswordStrength, TextArea } from "@/components/ui/Field";
+import { Field, TextArea } from "@/components/ui/Field";
+import { ChangePasswordCard } from "@/components/ui/ChangePasswordCard";
 import { Icon } from "@/components/ui/Icon";
 import { useToast } from "@/components/ui/Toast";
 import { cancelDeletion, requestDeletion, updateSettings } from "@/app/(student)/actions";
-import { passwordRules, passwordScore, resetSchema } from "@/lib/validation";
 import { fmtDate } from "@/lib/format";
 import type { NotificationPrefs } from "@/lib/types/database";
 
@@ -36,10 +35,6 @@ export function SettingsPanels({ name, email, prefs, hasPassword, deletionPendin
   const [nm, setNm] = useState(name);
   const [nmErr, setNmErr] = useState("");
   const [p, setP] = useState(prefs);
-  const [pw, setPw] = useState({ cur: "", nw: "", cf: "" });
-  const [pwErr, setPwErr] = useState<Record<string, string>>({});
-  const [pwBusy, setPwBusy] = useState(false);
-  const [resetSent, setResetSent] = useState(false);
   const [delOpen, setDelOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [delBusy, setDelBusy] = useState(false);
@@ -58,30 +53,6 @@ export function SettingsPanels({ name, email, prefs, hasPassword, deletionPendin
     setP(next);
     const r = await updateSettings({ prefs: next });
     if (!r.ok) { setP(p); toast(r.error, "error"); } else toast("Preference saved");
-  }
-  async function changePassword(e: FormEvent) {
-    e.preventDefault();
-    const err: Record<string, string> = {};
-    if (!pw.cur) err.cur = "Enter your current password.";
-    const parsed = resetSchema.safeParse({ password: pw.nw, confirm: pw.cf });
-    if (!parsed.success) for (const i of parsed.error.issues) err[i.path[0] === "password" ? "nw" : "cf"] ??= i.message;
-    if (pw.nw && pw.nw === pw.cur) err.nw = "Choose a password different from your current one.";
-    if (Object.keys(err).length) return setPwErr(err);
-    setPwBusy(true);
-    const sb = createClient();
-    const { error: verr } = await sb.auth.signInWithPassword({ email, password: pw.cur });
-    if (verr) { setPwBusy(false); return setPwErr({ cur: "That is not your current password." }); }
-    const { error } = await sb.auth.updateUser({ password: pw.nw });
-    setPwBusy(false);
-    if (error) return setPwErr({ nw: "We could not update your password. Try a different one." });
-    setPw({ cur: "", nw: "", cf: "" });
-    setPwErr({});
-    toast("Password updated");
-  }
-  async function sendReset() {
-    await createClient().auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/auth/callback?next=/reset-password` });
-    setResetSent(true);
-    toast(`Reset link sent to ${email}`);
   }
   async function confirmDelete() {
     setDelBusy(true);
@@ -108,19 +79,7 @@ export function SettingsPanels({ name, email, prefs, hasPassword, deletionPendin
         </form>
       </Card>
 
-      <Card title="Password">
-        {hasPassword ? (
-          <>
-            <form onSubmit={changePassword} className="flex flex-col gap-4" noValidate>
-              <PasswordField label="Current password" autoComplete="current-password" value={pw.cur} onChange={(e) => setPw({ ...pw, cur: e.target.value })} error={pwErr.cur} />
-              <PasswordField label="New password" autoComplete="new-password" value={pw.nw} onChange={(e) => setPw({ ...pw, nw: e.target.value })} error={pwErr.nw} />
-              <PasswordStrength score={passwordScore(pw.nw)} rules={passwordRules(pw.nw)} />
-              <PasswordField label="Confirm new password" autoComplete="new-password" value={pw.cf} onChange={(e) => setPw({ ...pw, cf: e.target.value })} error={pwErr.cf} />
-              <div className="flex flex-wrap items-center gap-3"><Button type="submit" loading={pwBusy}>Update password</Button><Button variant="ghost" onClick={sendReset} disabled={resetSent}>{resetSent ? "Reset link sent" : "Forgot it? Email me a reset link"}</Button></div>
-            </form>
-          </>
-        ) : <p className="text-ink-2">You sign in with Google, so your password is managed by your Google account.</p>}
-      </Card>
+      <ChangePasswordCard email={email} hasPassword={hasPassword} />
 
       <Card title="Notification preferences" subtitle="Choose which updates appear in your notifications.">
         <div className="divide-y divide-border">{PREFS.map(([k, l, d]) => <Toggle key={k} checked={p[k] !== false} onChange={(v) => setPref(k, v)} label={l} desc={d} />)}</div>

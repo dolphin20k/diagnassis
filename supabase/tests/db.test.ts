@@ -305,6 +305,75 @@ describe("diagnostic lifecycle and server-side grading", () => {
     });
   });
 
+  it("scores a beginner ('I don't know any of these skills') diagnostic as a valid result with nothing tested", async () => {
+    await tx(async () => {
+      const u = await createUser("beg@test.dev", "Beg");
+      await completeProfile(u, ["Git"]);
+      const rid = await roleId("Frontend Developer");
+      await asUser(u);
+      // Without the beginner flag, claiming nothing is still rejected.
+      await expectFail("select public.start_attempt($1, null, $2)", [rid, []], /skills_required/);
+      const a = (await c.query("select public.start_attempt($1, null, $2, true) as id", [rid, ["Git"]])).rows[0].id;
+      const qs = (await c.query("select count(*)::int as n from public.attempt_questions where attempt_id = $1", [a])).rows[0].n;
+      expect(qs).toBe(0);
+      const res = (await c.query("select public.submit_attempt($1) as r", [a])).rows[0].r;
+      expect(res.score).toBe(0);
+      expect(res.band).toBe("Early stage");
+      expect(res.tested_count).toBe(0);
+      expect(res.question_count).toBe(0);
+      expect(res.rows.length).toBeGreaterThan(0);
+      expect(res.rows.every((r: { status: string; tested: boolean }) => r.status === "missing" && r.tested === false)).toBe(true);
+      const claimed = (await c.query("select claimed_skills from public.attempts where id = $1", [a])).rows[0].claimed_skills;
+      expect(claimed).toEqual([]);
+    });
+  });
+
+  it("analytics buckets registrations and completions by their real Indian calendar day", async () => {
+    await tx(async () => {
+      const admin = await createUser("an@test.dev", "An");
+      await asSuper();
+      await c.query("update public.profiles set role = 'admin' where id = $1", [admin]);
+      const stu = await createUser("anstu@test.dev", "AnStu");
+      await completeProfile(stu, FE_SKILLS);
+      await asSuper();
+      // 20:00 UTC on 10 Nov is 01:30 IST on 11 Nov: it must be filed under 11 Nov.
+      await c.query("update public.profiles set created_at = '2026-11-10T20:00:00Z' where id = $1", [stu]);
+      await asUser(admin);
+      const a = (await c.query("select public.admin_analytics(365) as a")).rows[0].a;
+      const day = a.daily.find((d: { day: string }) => d.day === "2026-11-11");
+      // The window ends today, so the day only exists once the test clock has reached it.
+      if (day) expect(day.registrations).toBeGreaterThanOrEqual(1);
+      expect(new Set(a.daily.map((d: { day: string }) => d.day)).size).toBe(a.daily.length); // one row per date
+      expect(a.daily.at(-1).day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+  });
+
+  it("prefers questions the student has not seen, so retakes differ when the pool is larger than one test", async () => {
+    await tx(async () => {
+      const u = await createUser("var@test.dev", "Var");
+      await completeProfile(u, ["JavaScript"]);
+      const rid = await roleId("Frontend Developer");
+      await asSuper();
+      const sk = (await c.query("select id from public.skills where name = 'JavaScript'")).rows[0].id;
+      for (let i = 0; i < 5; i++) {
+        const q = (await c.query("insert into public.questions (skill_id, prompt, options, source) values ($1, $2, $3::jsonb, 'ai') returning id", [sk, `Extra JavaScript question number ${i}?`, JSON.stringify(["a", "b", "c", "d"])])).rows[0].id;
+        await c.query("insert into public.question_keys (question_id, correct_index) values ($1, 0)", [q]);
+      }
+      const take = async () => {
+        await asUser(u);
+        const a = (await c.query("select public.start_attempt($1, null, $2) as id", [rid, ["JavaScript"]])).rows[0].id;
+        const ids = (await c.query("select question_id from public.attempt_questions where attempt_id = $1", [a])).rows.map((r: { question_id: string }) => r.question_id);
+        await c.query("select public.submit_attempt($1)", [a]);
+        return ids;
+      };
+      const first = await take();
+      const second = await take();
+      expect(first).toHaveLength(5);
+      expect(second).toHaveLength(5);
+      expect(second.filter((id: string) => first.includes(id))).toHaveLength(0);
+    });
+  });
+
   it("supports a custom (AI-estimated) role through the stored estimate", async () => {
     await tx(async () => {
       const u = await createUser("cust@test.dev", "Cust");
