@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ensureQuestionBank } from "@/lib/server/question-bank";
+import { after } from "next/server";
+import { ensureQuestionBank, MIN_QUESTIONS, QUESTION_POOL_TARGET } from "@/lib/server/question-bank";
 import { friendlyError, isKnownCode } from "@/lib/server/errors";
 import { getApiUser, json } from "@/lib/server/api";
 import { sanitizeSkillList, roleKey } from "@/lib/sanitize";
-import { MAX_TESTED_SKILLS, QUESTIONS_PER_SKILL } from "@/lib/scoring";
+import { MAX_TESTED_SKILLS } from "@/lib/scoring";
 import { withinRateLimit } from "@/lib/ai/log";
 import type { RequirementSnapshot } from "@/lib/types/database";
 
@@ -57,8 +58,10 @@ export async function POST(req: Request) {
     if (!(await withinRateLimit(ctx.user.id, "questions", 40))) {
       return json({ error: "rate_limited", message: "You have started a lot of tests recently. Try again in a little while." }, 429);
     }
-    const counts = await ensureQuestionBank(candidates, ctx.user.id);
-    if (!candidates.some((s) => (counts[s] ?? 0) >= QUESTIONS_PER_SKILL)) {
+    // Only wait for AI when a skill cannot make a full test yet; growing the pool (for variety) happens after the response.
+    const counts = await ensureQuestionBank(candidates, ctx.user.id, MIN_QUESTIONS);
+    after(() => ensureQuestionBank(candidates, ctx.user.id, QUESTION_POOL_TARGET).then(() => undefined, () => undefined));
+    if (!candidates.some((s) => (counts[s] ?? 0) >= MIN_QUESTIONS)) {
       return json({ error: "questions_unavailable", message: "We could not prepare questions for your skills right now. Please try again in a moment." }, 503);
     }
   }

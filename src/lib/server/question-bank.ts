@@ -9,7 +9,10 @@ import { sanitizeLabel } from "@/lib/sanitize";
  * different students get different questions. With a pool of exactly 5 every test is identical.
  */
 export const QUESTION_POOL_TARGET = 20;
-const GENERATE_COUNT = 10;
+const GENERATE_COUNT = 8;
+/** A test needs this many questions per skill; below it the student must wait for generation. */
+export const MIN_QUESTIONS = 5;
+const inFlight = new Set<string>(); // skills currently being topped up, so parallel starts do not generate duplicates
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (m) => `\\${m}`);
 
 /**
@@ -17,7 +20,7 @@ const escapeLike = (s: string) => s.replace(/[\\%_]/g, (m) => `\\${m}`);
  * with the NVIDIA model. Students cannot write to the bank, so this runs with the service role
  * after the caller has been authenticated. Returns the number of active questions per skill.
  */
-export async function ensureQuestionBank(skills: string[], userId: string | null): Promise<Record<string, number>> {
+export async function ensureQuestionBank(skills: string[], userId: string | null, target: number = MIN_QUESTIONS): Promise<Record<string, number>> {
   const admin = createAdminClient();
   const log = dbLogger(userId);
   const counts: Record<string, number> = {};
@@ -41,9 +44,10 @@ export async function ensureQuestionBank(skills: string[], userId: string | null
         (await admin.from("questions").select("id", { count: "exact", head: true }).eq("skill_id", skillId).eq("status", "active")).count ?? 0;
 
       let have = await countActive();
-      if (have < QUESTION_POOL_TARGET) {
+      if (have < target && !inFlight.has(skillId)) {
+        inFlight.add(skillId);
         try {
-          const { questions, model } = await generateQuestions(canonical, Math.min(GENERATE_COUNT, QUESTION_POOL_TARGET - have), log);
+          const { questions, model } = await generateQuestions(canonical, Math.min(GENERATE_COUNT, Math.max(target, MIN_QUESTIONS) - have), log);
           for (const q of questions) {
             const ins = await admin
               .from("questions")
@@ -56,6 +60,8 @@ export async function ensureQuestionBank(skills: string[], userId: string | null
           }
         } catch {
           /* generation failure is reported through the count below */
+        } finally {
+          inFlight.delete(skillId);
         }
         have = await countActive();
       }

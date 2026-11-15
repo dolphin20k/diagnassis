@@ -51,6 +51,7 @@ export async function POST(req: Request) {
   } catch (e) {
     if (e instanceof RoleNotPlausibleError) return json({ error: "role_not_plausible", message: e.reason }, 422);
     if (e instanceof AiNotConfiguredError) return json({ error: "ai_unavailable", message: "AI estimation is not configured on this server." }, 503);
+    if (e instanceof AiError && e.code === "timeout") return json({ error: "ai_slow", message: "The AI service is slow right now and did not answer in time. Please press Continue again in a minute." }, 504);
     if (e instanceof AiError) return json({ error: "ai_failed", message: "We could not estimate that role right now. Try again in a moment." }, 502);
     return json({ error: "server_error", message: "Something went wrong. Please try again." }, 500);
   }

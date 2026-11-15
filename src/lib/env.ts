@@ -35,10 +35,10 @@ export function getServiceRoleKey(): string {
  * (HTTP 404/410). `meta/llama-3.3-70b-instruct` was retired (410 Gone) which broke every AI feature.
  */
 export const DEFAULT_AI_MODELS = [
-  "mistralai/mistral-large-2-instruct",
   "nvidia/llama-3.1-nemotron-70b-instruct",
-  "nvidia/llama-3.1-nemotron-ultra-253b-v1",
-  "mistralai/mistral-large",
+  "mistralai/mistral-large-2-instruct",
+  "google/gemma-3-12b-it",
+  "nv-mistralai/mistral-nemo-12b-instruct",
   "openai/gpt-oss-20b",
 ];
 
@@ -62,7 +62,7 @@ export function getAiEnv(): AiEnv {
     baseUrl: (process.env.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1").replace(/\/+$/, ""),
     model: models[0] as string,
     models,
-    timeoutMs: Number(process.env.NVIDIA_TIMEOUT_MS) > 0 ? Number(process.env.NVIDIA_TIMEOUT_MS) : 25_000,
+    timeoutMs: Number(process.env.NVIDIA_TIMEOUT_MS) > 0 ? Number(process.env.NVIDIA_TIMEOUT_MS) : 40_000,
   };
 }
 

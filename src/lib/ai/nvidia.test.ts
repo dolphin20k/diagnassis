@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { AiError, callJson, extractJson, pingNvidia } from "@/lib/ai/nvidia";
+import { AiError, callJson, extractJson, HEDGE_AFTER_MS, pingNvidia } from "@/lib/ai/nvidia";
 
 const schema = z.object({ n: z.number() });
 const reply = (content: string, status = 200) =>
@@ -100,6 +100,34 @@ describe("callJson", () => {
   it("ignores <think> reasoning blocks before the JSON", async () => {
     const f = vi.fn().mockResolvedValue(reply('<think>let me {think}</think>{"n": 5}'));
     expect((await callJson({ ...base, fetchImpl: f as unknown as typeof fetch })).data.n).toBe(5);
+  });
+
+  it("starts the next model when the first is slow, uses whichever answers first, and cancels the slow one", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.NVIDIA_TIMEOUT_MS = "60000";
+      let slowAborted = false;
+      const f = vi.fn((_url: string, init: RequestInit) => {
+        const model = JSON.parse(init.body as string).model as string;
+        if (model === "test-model") {
+          return new Promise<Response>((_res, rej) => init.signal?.addEventListener("abort", () => { slowAborted = true; rej(Object.assign(new Error("aborted"), { name: "AbortError" })); }));
+        }
+        return Promise.resolve(reply('{"n": 9}'));
+      });
+      const p = callJson({ ...base, fetchImpl: f as unknown as typeof fetch });
+      await vi.advanceTimersByTimeAsync(HEDGE_AFTER_MS + 50);
+      expect((await p).data.n).toBe(9);
+      expect(f).toHaveBeenCalledTimes(2);
+      expect(slowAborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops immediately on an invalid key instead of trying every model", async () => {
+    const f = vi.fn().mockResolvedValue(new Response("no", { status: 403 }));
+    await expect(callJson({ ...base, fetchImpl: f as unknown as typeof fetch })).rejects.toMatchObject({ code: "http", status: 403 });
+    expect(f).toHaveBeenCalledTimes(1);
   });
 
   it("throws when the API key is not configured", async () => {
