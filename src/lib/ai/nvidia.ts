@@ -83,7 +83,7 @@ const MODEL_GONE = new Set([404, 410]);
 /** Wrong or unauthorised key: no other model will help, so stop at once. */
 const FATAL = new Set([401, 403]);
 /** If the current model has not answered after this long, start the next one in parallel and use whichever answers first. */
-export const HEDGE_AFTER_MS = 8_000;
+export const HEDGE_AFTER_MS = 6_000;
 const MAX_PARALLEL = 3;
 
 /** Reasoning models wrap their chain of thought in <think> tags; it must not reach the JSON parser. */
@@ -91,6 +91,44 @@ const stripThinking = (t: string) => t.replace(/<think>[\s\S]*?<\/think>/gi, "")
 
 // Remembers the model that last answered so later requests start with one that is alive and reasonably fast.
 let workingModel: string | null = null;
+/** Models that answered 404/410 (retired / not offered to this key) are skipped for a while; slow ones are tried last. */
+const goneUntil = new Map<string, number>();
+const slowUntil = new Map<string, number>();
+const GONE_FOR_MS = 6 * 60 * 60 * 1000;
+const SLOW_FOR_MS = 10 * 60 * 1000;
+let discovered: { at: number; ids: string[] } | null = null;
+const DISCOVERY_TTL_MS = 30 * 60 * 1000;
+/** Chat-capable models only: the catalogue also lists embedding, guard, reward, image and speech models. */
+const NOT_CHAT = /embed|guard|safety|reward|rerank|parse|clip|bge|whisper|tts|asr|image|diffusion|sdxl|flux|translate|retriev|deplot|detector|calibration|vila|neva|fuyu|paligemma|kosmos|llava|cosmos|omni|starcoder|codellama|codestral|coder|laguna/i;
+
+/** Lists the models this key can use (cached). Returns null when the listing is unavailable. */
+async function discoverModels(env: Env, fetchImpl: typeof fetch): Promise<string[] | null> {
+  if (!env.discover) return null;
+  if (discovered && Date.now() - discovered.at < DISCOVERY_TTL_MS) return discovered.ids;
+  try {
+    const res = await fetchImpl(`${env.baseUrl}/models`, { headers: { Authorization: `Bearer ${env.apiKey}` }, signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { data?: { id?: string }[] };
+    const ids = (body.data ?? []).map((m) => m.id ?? "").filter((id) => id && !NOT_CHAT.test(id));
+    if (ids.length === 0) return null;
+    discovered = { at: Date.now(), ids };
+    return ids;
+  } catch {
+    return null;
+  }
+}
+
+/** Candidate order: last working model, configured + preferred models the key can use, then any other listed chat model. */
+async function candidates(env: Env, fetchImpl: typeof fetch): Promise<string[]> {
+  const listed = await discoverModels(env, fetchImpl);
+  const preferred = listed ? env.models.filter((m) => listed.includes(m) || m === env.configured) : env.models;
+  const extra = listed ? listed.filter((m) => !preferred.includes(m)) : [];
+  const now = Date.now();
+  let order = [...new Set([...(workingModel ? [workingModel] : []), ...preferred, ...extra])];
+  const alive = order.filter((m) => (goneUntil.get(m) ?? 0) < now);
+  order = alive.length ? alive : order;
+  return [...order.filter((m) => (slowUntil.get(m) ?? 0) < now), ...order.filter((m) => (slowUntil.get(m) ?? 0) >= now)];
+}
 
 class Cancelled extends Error {}
 
@@ -111,20 +149,31 @@ async function attempt(
   const timer = setTimeout(() => ctrl.abort(), env.timeoutMs);
   try {
     let res: Response | null = null;
-    for (let i = 0; i < 2; i++) {
+    // Current NVIDIA models are reasoning models: thinking tokens count against max_tokens and add many seconds, and the
+    // JSON tasks here do not need it. enable_thinking=false is honoured by Nemotron and ignored by others; if a model
+    // rejects the field (400) we retry once without it.
+    let noThinking = true;
+    for (let i = 0; i < 3; i++) {
       res = await opts.fetchImpl(`${env.baseUrl}/chat/completions`, {
         method: "POST",
         signal: ctrl.signal,
         headers: { Authorization: `Bearer ${env.apiKey}`, "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ model, messages, temperature: opts.temperature, top_p: 0.9, max_tokens: opts.maxTokens, stream: false }),
+        body: JSON.stringify({
+          model, messages, temperature: opts.temperature, top_p: 0.9, stream: false,
+          // Headroom for models that still think a little before answering.
+          max_tokens: opts.maxTokens + 1024,
+          ...(noThinking ? { chat_template_kwargs: { enable_thinking: false } } : {}),
+        }),
       });
+      if (res.status === 400 && noThinking) { noThinking = false; continue; }
       if (res.status !== 429 && res.status < 500) break;
+      if (i === 2) break;
       await new Promise((r) => setTimeout(r, 600 * (i + 1)));
     }
     if (!res) throw new AiError("http", "No response");
     // Never echo the response body: it can contain request details.
     if (!res.ok) throw new AiError("http", `NVIDIA API responded with ${res.status}`, res.status);
-    const body = (await res.json()) as { choices?: { message?: { content?: string } }[]; model?: string };
+    const body = (await res.json()) as { choices?: { message?: { content?: string | null } }[]; model?: string };
     const text = stripThinking(body.choices?.[0]?.message?.content ?? "");
     if (!text.trim()) throw new AiError("empty", "Model returned no content");
     return { text, model: body.model || model };
@@ -149,7 +198,7 @@ async function complete(
   opts: { maxTokens: number; temperature: number; fetchImpl: typeof fetch },
 ): Promise<Completion> {
   const env = getAiEnv();
-  const order = workingModel && env.models.includes(workingModel) ? [workingModel, ...env.models.filter((m) => m !== workingModel)] : env.models;
+  const order = await candidates(env, opts.fetchImpl);
   return new Promise<Completion>((resolve, reject) => {
     const master = new AbortController();
     const errors: AiError[] = [];
@@ -173,7 +222,11 @@ async function complete(
           const err = e instanceof AiError ? e : new AiError("http", "Unexpected AI failure");
           errors.push(err);
           if (err.status !== undefined && FATAL.has(err.status)) return finish(() => reject(err));
-          if (err.status !== undefined && MODEL_GONE.has(err.status) && workingModel === model) workingModel = null;
+          if (err.status !== undefined && MODEL_GONE.has(err.status)) {
+            goneUntil.set(model, Date.now() + GONE_FOR_MS);
+            if (workingModel === model) workingModel = null;
+          }
+          if (err.code === "timeout" || err.code === "empty") slowUntil.set(model, Date.now() + SLOW_FOR_MS);
           if (next < order.length) return launch();
           if (live === 0) {
             const timedOut = errors.find((x) => x.code === "timeout");
@@ -204,7 +257,16 @@ export async function callJson<T>(o: JsonCallOptions<T>): Promise<{ data: T; mod
       const out = await complete(messages, { maxTokens: o.maxTokens ?? 2048, temperature: o.temperature ?? 0.4, fetchImpl });
       model = out.model;
       try {
-        const parsed = o.schema.safeParse(extractJson(out.text));
+        const raw = extractJson(out.text);
+        let parsed = o.schema.safeParse(raw);
+        // Models sometimes echo the prompt's shape and wrap the answer, e.g. {"output_format": {...}}: unwrap one level.
+        if (!parsed.success && raw && typeof raw === "object" && !Array.isArray(raw)) {
+          const vals = Object.values(raw as Record<string, unknown>);
+          if (vals.length === 1 && vals[0] && typeof vals[0] === "object") {
+            const inner = o.schema.safeParse(vals[0]);
+            if (inner.success) parsed = inner;
+          }
+        }
         if (parsed.success) {
           await o.log?.({ kind: o.kind, model, ok: true, latencyMs: Date.now() - started });
           return { data: parsed.data, model };
@@ -253,4 +315,12 @@ export async function probeNvidia(fetchImpl: typeof fetch = fetch): Promise<{ ok
     const err = e instanceof AiError ? e : new AiError("http", "Unexpected AI failure");
     return { ok: false, model: "", latencyMs: Date.now() - started, detail: err.code === "timeout" ? "Timed out: the AI service is too slow right now" : err.status ? `HTTP ${err.status}` : err.message };
   }
+}
+
+/** Test helper: forget which models worked, failed or were listed. */
+export function resetModelStateForTests() {
+  workingModel = null;
+  goneUntil.clear();
+  slowUntil.clear();
+  discovered = null;
 }

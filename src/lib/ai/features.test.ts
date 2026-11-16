@@ -6,6 +6,7 @@ const llm = (obj: unknown) => new Response(JSON.stringify({ model: "m", choices:
 beforeEach(() => {
   process.env.NVIDIA_API_KEY = "nvapi-test";
   process.env.NVIDIA_TIMEOUT_MS = "800";
+  process.env.NVIDIA_DISCOVER_MODELS = "false";
 });
 afterEach(() => {
   delete process.env.NVIDIA_API_KEY;

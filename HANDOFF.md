@@ -35,3 +35,10 @@ Complete DEPLOYMENT.md checklist → fix integration findings → add authentica
 - Root cause of "could not estimate that role" and every market-research failure: NVIDIA retired `meta/llama-3.3-70b-instruct` (HTTP 410). The AI client now tries `NVIDIA_MODEL`, then built-in live models, skipping retired ones.
 - PDF title/details overlap fixed; stored R2 reports are versioned (`REPORT_LAYOUT_VERSION`) so old PDFs regenerate.
 - Notification dropdown + profile popover (student and admin), admin Change Password, real YouTube videos with thumbnails, per-attempt question variety (pool of 20 per skill), "I don't know any of these skills" button + beginner roadmap, custom branch, clearer analytics chart.
+
+### AI model outage (16 Nov 2026)
+NVIDIA retired llama-3.1-nemotron-70b, mistral-large-2 and mistral-nemo on 15 Nov, and gpt-oss-20b stopped answering, so every AI call timed out.
+The client now (1) asks NVIDIA which models the key can use, (2) prefers models measured to answer in about 1 s,
+(3) sends `enable_thinking: false` (current models are reasoning models whose thinking used up the answer budget),
+(4) races a second model when the first is slow, and (5) unwraps replies the model nested in an extra key.
+Verified with real calls: role estimation, market research, suggestion review, question generation and insights all succeed.

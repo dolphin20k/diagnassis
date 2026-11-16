@@ -31,15 +31,16 @@ export function getServiceRoleKey(): string {
 }
 
 /**
- * Chat models tried in order when none is configured, or when the configured one has been retired by NVIDIA
- * (HTTP 404/410). `meta/llama-3.3-70b-instruct` was retired (410 Gone) which broke every AI feature.
+ * Preferred chat models, fastest/most reliable first (measured 16 Nov 2026 against the NVIDIA API: ~0.3-1.5 s with
+ * thinking disabled). NVIDIA retires models without notice (llama-3.3-70b on 5 Nov, nemotron-70b / mistral-large-2 /
+ * mistral-nemo on 15 Nov), so this list is only a preference: at runtime the client also asks NVIDIA which models
+ * the key can use and skips any model that answers 404/410.
  */
 export const DEFAULT_AI_MODELS = [
-  "nvidia/llama-3.1-nemotron-70b-instruct",
-  "mistralai/mistral-large-2-instruct",
-  "google/gemma-3-12b-it",
-  "nv-mistralai/mistral-nemo-12b-instruct",
-  "openai/gpt-oss-20b",
+  "nvidia/nemotron-3-ultra-550b-a55b",
+  "nvidia/nemotron-3.5-super-vl-120b-a12b",
+  "mistralai/mistral-large-4-1t-a52b",
+  "nvidia/nemotron-3.5-lightning-30b-a3b",
 ];
 
 export interface AiEnv {
@@ -49,6 +50,10 @@ export interface AiEnv {
   model: string;
   /** Ordered candidates: the configured NVIDIA_MODEL first, then DEFAULT_AI_MODELS. */
   models: string[];
+  /** NVIDIA_MODEL as set by the operator (always tried first, even when the catalogue does not list it). */
+  configured: string | null;
+  /** Ask the API which models this key can use (NVIDIA_DISCOVER_MODELS=false turns it off). */
+  discover: boolean;
   timeoutMs: number;
 }
 
@@ -62,6 +67,8 @@ export function getAiEnv(): AiEnv {
     baseUrl: (process.env.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1").replace(/\/+$/, ""),
     model: models[0] as string,
     models,
+    discover: process.env.NVIDIA_DISCOVER_MODELS !== "false",
+    configured: configured || null,
     timeoutMs: Number(process.env.NVIDIA_TIMEOUT_MS) > 0 ? Number(process.env.NVIDIA_TIMEOUT_MS) : 40_000,
   };
 }

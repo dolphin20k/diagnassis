@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { AiError, callJson, extractJson, HEDGE_AFTER_MS, pingNvidia } from "@/lib/ai/nvidia";
+import { AiError, callJson, extractJson, HEDGE_AFTER_MS, pingNvidia, resetModelStateForTests } from "@/lib/ai/nvidia";
 
 const schema = z.object({ n: z.number() });
 const reply = (content: string, status = 200) =>
@@ -11,6 +11,8 @@ beforeEach(() => {
   process.env.NVIDIA_BASE_URL = "https://nim.test/v1";
   process.env.NVIDIA_MODEL = "test-model";
   process.env.NVIDIA_TIMEOUT_MS = "500";
+  process.env.NVIDIA_DISCOVER_MODELS = "false";
+  resetModelStateForTests();
 });
 afterEach(() => {
   delete process.env.NVIDIA_API_KEY;
@@ -95,6 +97,35 @@ describe("callJson", () => {
   it("fails clearly when every candidate model is retired", async () => {
     const f = vi.fn().mockImplementation(async () => new Response("gone", { status: 410 }));
     await expect(callJson({ ...base, fetchImpl: f as unknown as typeof fetch })).rejects.toMatchObject({ code: "http", status: 410 });
+  });
+
+  it("unwraps a reply the model nested inside a single key such as output_format", async () => {
+    const f = vi.fn().mockResolvedValue(reply('{"output_format": {"n": 4}}'));
+    expect((await callJson({ ...base, fetchImpl: f as unknown as typeof fetch })).data.n).toBe(4);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks NVIDIA to skip reasoning and retries without that field if a model rejects it", async () => {
+    const f = vi.fn().mockResolvedValueOnce(new Response("bad field", { status: 400 })).mockResolvedValueOnce(reply('{"n": 6}'));
+    expect((await callJson({ ...base, fetchImpl: f as unknown as typeof fetch })).data.n).toBe(6);
+    const first = JSON.parse((f.mock.calls[0] as [string, RequestInit])[1].body as string);
+    const second = JSON.parse((f.mock.calls[1] as [string, RequestInit])[1].body as string);
+    expect(first.chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect(second.chat_template_kwargs).toBeUndefined();
+  });
+
+  it("uses the models the key can actually access and skips retired preferred ones", async () => {
+    process.env.NVIDIA_DISCOVER_MODELS = "true";
+    process.env.NVIDIA_MODEL = "";
+    const f = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [{ id: "nvidia/nemotron-3.5-super-vl-120b-a12b" }, { id: "some/embed-model" }] }), { status: 200 });
+      const model = JSON.parse(init!.body as string).model;
+      return model === "nvidia/nemotron-3.5-super-vl-120b-a12b" ? reply('{"n": 7}') : new Response("gone", { status: 410 });
+    });
+    const out = await callJson({ ...base, fetchImpl: f as unknown as typeof fetch });
+    expect(out.data.n).toBe(7);
+    const tried = f.mock.calls.filter((c) => !String(c[0]).endsWith("/models")).map((c) => JSON.parse((c[1] as RequestInit).body as string).model);
+    expect(tried).toEqual(["nvidia/nemotron-3.5-super-vl-120b-a12b"]); // unlisted preferred models are not even tried
   });
 
   it("ignores <think> reasoning blocks before the JSON", async () => {
