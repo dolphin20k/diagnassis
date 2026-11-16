@@ -4,7 +4,7 @@ import { estimateRoleRequirements, RoleNotPlausibleError } from "@/lib/ai/featur
 import { AiError } from "@/lib/ai/nvidia";
 import { AiNotConfiguredError } from "@/lib/env";
 import { dbLogger, withinRateLimit } from "@/lib/ai/log";
-import { getApiUser, json } from "@/lib/server/api";
+import { getApiUser, json, readJson } from "@/lib/server/api";
 import { roleKey, sanitizeLabel } from "@/lib/sanitize";
 
 export const runtime = "nodejs";
@@ -16,7 +16,7 @@ const body = z.object({ role: z.string().trim().min(2).max(80) });
 export async function POST(req: Request) {
   const ctx = await getApiUser();
   if (!ctx) return json({ error: "unauthenticated" }, 401);
-  const parsed = body.safeParse(await req.json().catch(() => null));
+  const parsed = body.safeParse(await readJson(req));
   if (!parsed.success) return json({ error: "invalid_role", message: "Type the role you are aiming for." }, 400);
 
   const name = sanitizeLabel(parsed.data.role, 80);

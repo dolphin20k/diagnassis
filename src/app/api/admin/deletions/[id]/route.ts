@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { deleteReports, r2Configured } from "@/lib/r2";
 import { friendlyError, isKnownCode } from "@/lib/server/errors";
-import { getApiAdmin, json, UUID } from "@/lib/server/api";
+import { getApiAdmin, json, UUID, readJson } from "@/lib/server/api";
 
 export const runtime = "nodejs";
 
@@ -14,7 +14,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const ctx = await getApiAdmin();
   if (!ctx) return json({ error: "forbidden", message: friendlyError("forbidden") }, 403);
-  const parsed = z.object({ approve: z.boolean() }).safeParse(await req.json().catch(() => null));
+  const parsed = z.object({ approve: z.boolean() }).safeParse(await readJson(req));
   if (!UUID.test(id) || !parsed.success) return json({ error: "invalid_request" }, 400);
 
   if (parsed.data.approve) {

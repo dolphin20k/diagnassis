@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { after } from "next/server";
 import { ensureQuestionBank, MIN_QUESTIONS, QUESTION_POOL_TARGET } from "@/lib/server/question-bank";
 import { friendlyError, isKnownCode } from "@/lib/server/errors";
-import { getApiUser, json } from "@/lib/server/api";
+import { getApiUser, json, readJson } from "@/lib/server/api";
 import { sanitizeSkillList, roleKey } from "@/lib/sanitize";
 import { MAX_TESTED_SKILLS } from "@/lib/scoring";
 import { withinRateLimit } from "@/lib/ai/log";
@@ -30,7 +30,7 @@ const body = z
 export async function POST(req: Request) {
   const ctx = await getApiUser();
   if (!ctx) return json({ error: "unauthenticated" }, 401);
-  const parsed = body.safeParse(await req.json().catch(() => null));
+  const parsed = body.safeParse(await readJson(req));
   if (!parsed.success) return json({ error: "invalid_request", message: "Choose a role and at least one skill." }, 400);
   const { roleId, customRole } = parsed.data;
   const beginner = parsed.data.beginner === true;

@@ -42,4 +42,15 @@ describe("YouTube resolver", () => {
     expect(ids.every(Boolean)).toBe(true);
     expect(new Set(ids).size).toBe(ids.length);
   });
+
+  it("limits the work a crafted insights document can trigger (no unbounded outbound requests)", async () => {
+    const f = stubFetch([A, B]);
+    const mkAction = (n: number) => ({ skill: `s${n}`, status: "missing" as const, priority: "high" as const, trend: null, why: "w", next_step: "n", ai_generated: false,
+      resources: Array.from({ length: 50 }, (_, i) => ({ title: `t${n}-${i}`, kind: "video", search_query: `unique query ${n} ${i}`, level: null })) });
+    const out = await attachVideos(Array.from({ length: 40 }, (_, n) => mkAction(n)));
+    const searches = f.mock.calls.filter((c) => String(c[0]).includes("/results?")).length;
+    expect(searches).toBeLessThanOrEqual(5 * 3); // 5 actions x 3 resources at most
+    expect(out).toHaveLength(40);
+    expect(out[39]!.resources.every((r) => !r.video_id)).toBe(true); // beyond the cap: untouched
+  });
 });

@@ -8,15 +8,18 @@ import { getR2Env } from "@/lib/env";
  * objects are only ever reachable through short-lived presigned URLs that the server issues
  * after verifying the requester owns the report. Credentials never reach the browser.
  */
-const KEY_RE = /^reports\/[0-9a-f-]{36}\/[0-9a-f-]{36}(\.v\d+)?\.pdf$/;
-/** Bump when the PDF layout changes: stored reports with an older version are ignored and regenerated on next download. */
+const KEY_RE = /^reports\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.pdf$/;
+/**
+ * Bump when the PDF layout changes. The version is stored as object metadata (the key stays `reports/<user>/<attempt>.pdf`, which the
+ * reports table and the account-deletion cleanup rely on); older objects are regenerated and overwritten on next download.
+ */
 export const REPORT_LAYOUT_VERSION = 2;
 export const SIGNED_URL_TTL_SECONDS = 300;
 export const MAX_REPORT_BYTES = 10 * 1024 * 1024;
 
 /** Keys are built only from server-verified UUIDs, never from user-supplied names. */
 export function reportKey(userId: string, attemptId: string): string {
-  const key = `reports/${userId}/${attemptId}.v${REPORT_LAYOUT_VERSION}.pdf`;
+  const key = `reports/${userId}/${attemptId}.pdf`;
   if (!KEY_RE.test(key)) throw new Error("invalid_report_key");
   return key;
 }
@@ -52,16 +55,18 @@ export async function putReport(key: string, bytes: Uint8Array): Promise<void> {
       Body: bytes,
       ContentType: "application/pdf",
       CacheControl: "private, max-age=0, no-store",
+      Metadata: { layout: String(REPORT_LAYOUT_VERSION) },
     }),
   );
 }
 
+/** True only when the stored report exists AND was generated with the current layout version. */
 export async function reportExists(key: string): Promise<boolean> {
   const c = client();
   if (!c || !isValidReportKey(key)) return false;
   try {
-    await c.s3.send(new HeadObjectCommand({ Bucket: c.env.bucket, Key: key }));
-    return true;
+    const head = await c.s3.send(new HeadObjectCommand({ Bucket: c.env.bucket, Key: key }));
+    return head.Metadata?.layout === String(REPORT_LAYOUT_VERSION);
   } catch {
     return false;
   }

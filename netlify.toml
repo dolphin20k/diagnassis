@@ -4,6 +4,10 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # Netlify's secrets scanner fails the build when an env var VALUE appears in the output. These three are PUBLIC by design
+  # (Supabase URL + publishable/anon key are sent to every browser; row-level security is the control, not secrecy), so they
+  # are omitted from scanning. Server secrets (SUPABASE_SERVICE_ROLE_KEY, NVIDIA_API_KEY, R2_*, CRON_SECRET, ...) stay scanned.
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,NEXT_PUBLIC_SUPABASE_ANON_KEY,NEXT_PUBLIC_SITE_URL"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"

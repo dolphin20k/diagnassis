@@ -7,14 +7,14 @@ const A = "7a1d9c20-55aa-4b0e-8d61-12c3f4e5a6b7";
 
 describe("R2 object keys", () => {
   it("are built only from UUIDs", () => {
-    expect(reportKey(U, A)).toBe(`reports/${U}/${A}.v${REPORT_LAYOUT_VERSION}.pdf`);
+    expect(reportKey(U, A)).toBe(`reports/${U}/${A}.pdf`); // must match the reports.storage_key CHECK constraint
+    expect(REPORT_LAYOUT_VERSION).toBeGreaterThan(1);
     expect(() => reportKey("../../etc", A)).toThrow();
     expect(() => reportKey(U, "x/../y")).toThrow();
   });
   it("validate strictly", () => {
     expect(isValidReportKey(`reports/${U}/${A}.pdf`)).toBe(true);
-    expect(isValidReportKey(`reports/${U}/${A}.v2.pdf`)).toBe(true);
-    for (const bad of ["reports/a/b.pdf", `reports/${U}/${A}.exe`, `../reports/${U}/${A}.pdf`, `reports/${U}/${A}.pdf/../x`, ""]) expect(isValidReportKey(bad)).toBe(false);
+    for (const bad of [`reports/${U}/${A}.v2.pdf`, "reports/a/b.pdf", `reports/${U}/${A}.exe`, `../reports/${U}/${A}.pdf`, `reports/${U}/${A}.pdf/../x`, ""]) expect(isValidReportKey(bad)).toBe(false);
   });
 });
 

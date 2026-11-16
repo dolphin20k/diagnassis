@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { putReport, r2Configured, reportExists, reportKey, signedReportUrl } from "@/lib/r2";
+import { deleteReports, putReport, r2Configured, reportExists, reportKey, signedReportUrl } from "@/lib/r2";
 import { renderReportPdf } from "@/lib/report/pdf";
 import { getApiUser, json, UUID } from "@/lib/server/api";
 import { attachVideos } from "@/lib/server/youtube";
@@ -70,16 +70,21 @@ export async function GET(_req: Request, { params }: { params: Promise<{ attempt
   await notifyReady().catch(() => undefined);
 
   if (useR2) {
+    let stored = false;
     try {
       await putReport(key, pdf);
+      stored = true;
       const admin = createAdminClient();
       const { data: existing } = await admin.from("reports").select("id").eq("attempt_id", attemptId).maybeSingle();
-      if (!existing) {
-        await admin.from("reports").insert({ attempt_id: attemptId, user_id: ctx.user.id, storage_key: key, size_bytes: pdf.byteLength });
-      }
+      // The reports row is what account deletion uses to find (and erase) this object, so a failed write must never be ignored.
+      const { error } = existing
+        ? await admin.from("reports").update({ size_bytes: pdf.byteLength }).eq("id", existing.id)
+        : await admin.from("reports").insert({ attempt_id: attemptId, user_id: ctx.user.id, storage_key: key, size_bytes: pdf.byteLength });
+      if (error) throw new Error("report_metadata_failed");
       return NextResponse.redirect(await signedReportUrl(key, filename), { status: 302, headers: { "Cache-Control": "no-store" } });
     } catch {
-      // R2 failure must not block the student: fall through to a direct download.
+      // Never leave an untracked personal-data object in R2; then fall through to a direct download so the student is not blocked.
+      if (stored) await deleteReports([key]).catch(() => undefined);
     }
   }
 

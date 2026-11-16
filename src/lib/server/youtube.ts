@@ -14,6 +14,10 @@ const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const UA = "Mozilla/5.0 (compatible; DiagnassisBot/1.0)";
 const cache = new Map<string, { at: number; v: ResolvedVideo[] }>();
 const TTL = 24 * 60 * 60 * 1000;
+/** Insights are user-writable (save_attempt_insights), so bound the work and memory a single request or user can cause. */
+const MAX_CACHE = 300;
+const MAX_ACTIONS = 5;
+const MAX_RESOURCES = 3;
 
 async function candidateIds(query: string): Promise<string[]> {
   const key = process.env.YOUTUBE_API_KEY;
@@ -64,7 +68,10 @@ export async function findVideos(query: string, limit = 1, exclude: ReadonlySet<
     } catch {
       pool = [];
     }
-    if (pool.length) cache.set(q.toLowerCase(), { at: Date.now(), v: pool });
+    if (pool.length) {
+      if (cache.size >= MAX_CACHE) cache.delete(cache.keys().next().value as string); // evict the oldest entry
+      cache.set(q.toLowerCase(), { at: Date.now(), v: pool });
+    }
   }
   return pool.filter((v) => !exclude.has(v.id)).slice(0, limit);
 }
@@ -72,10 +79,11 @@ export async function findVideos(query: string, limit = 1, exclude: ReadonlySet<
 /** Fills video_id / video_title / channel on every "video" resource that has none yet; each action gets distinct videos. */
 export async function attachVideos(actions: ActionItem[]): Promise<ActionItem[]> {
   return Promise.all(
-    actions.map(async (a) => {
+    actions.map(async (a, idx) => {
+      if (idx >= MAX_ACTIONS) return a;
       const used = new Set(a.resources.map((r) => r.video_id).filter((x): x is string => !!x));
       const resources = [...a.resources];
-      for (let i = 0; i < resources.length; i++) {
+      for (let i = 0; i < Math.min(resources.length, MAX_RESOURCES); i++) {
         const r = resources[i]!;
         if (r.kind !== "video" || r.video_id) continue;
         const [v] = await findVideos(r.search_query, 1, used);

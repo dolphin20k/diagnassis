@@ -27,3 +27,16 @@ DB tests (28) incl. escalation, key secrecy, tenant isolation, admin-RPC denial,
 - Admin accounts are created by SQL promotion; use a strong, MFA-protected Supabase account for that user.
 - No Content-Security-Policy yet (Next inline scripts need nonce setup).
 - Not independently pen-tested; "no obvious issues" ≠ "secure".
+
+## Production security audit (16 Nov 2026)
+Scope: repo, live Supabase project, Cloudflare R2, Netlify config. Method and results: see `supabase/tests/attack.test.ts` (attacker-as-normal-user tests, run against a database built from the migrations)
+and the checks listed in the audit report.
+
+Fixed in code: stale/untracked R2 report objects (key format vs `reports` table, metadata-versioned PDFs, failed tracking insert now aborts and deletes the object);
+unbounded request bodies (`readJson` 32 KB cap, mitigates the zod memory-exhaustion advisory); bounded work in `attachVideos`; CSP subset; Netlify `SECRETS_SCAN_OMIT_KEYS` for the three public values.
+
+Must be set in dashboards (cannot be set from code):
+- Supabase Auth -> Sign In / Providers -> Email: turn ON "Confirm email" (it was OFF: `mailer_autoconfirm: true`), set minimum password length to 8+ and enable leaked-password protection if the plan allows.
+- Supabase Auth -> URL Configuration: Site URL = production URL; Redirect URLs = production URL(s) only (no wildcards, no localhost).
+- Cloudflare R2: bucket `diagnassis-reports` must have public access / r2.dev subdomain DISABLED and no custom domain; API token scoped to Object Read & Write on that one bucket.
+- Netlify: mark SUPABASE_SERVICE_ROLE_KEY, NVIDIA_API_KEY, R2_*, CRON_SECRET, YOUTUBE_API_KEY as secret values and scope them to Production (and Functions); do not expose them to deploy previews.

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DEFAULT_AI_MODELS, getCronSecret } from "@/lib/env";
 import { runRoleResearch } from "@/lib/server/research";
-import { getApiAdmin, json, UUID } from "@/lib/server/api";
+import { getApiAdmin, json, UUID, readJson } from "@/lib/server/api";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
   const adminCtx = viaCron ? null : await getApiAdmin();
   if (!viaCron && !adminCtx) return json({ error: "forbidden" }, 403);
 
-  const parsed = body.safeParse(await req.json().catch(() => null));
+  const parsed = body.safeParse(await readJson(req));
   if (!parsed.success) return json({ error: "invalid_request" }, 400);
   const admin = createAdminClient();
   const b = parsed.data;

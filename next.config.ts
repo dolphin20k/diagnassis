@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const securityHeaders = [
+  // Safe subset that needs no per-request nonce: blocks framing, <base> hijacking, plugins and cross-site form posts.
+  { key: "Content-Security-Policy", value: "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
